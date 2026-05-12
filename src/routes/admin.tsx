@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { AdminScreen } from '../components/AdminScreen'
 import { PinGate } from '../components/PinGate'
+import { useMutation, useQuery } from '../convex/hooks'
 import { DEFAULT_ADMIN_PASSWORD, defaultAdminState, emptyTeamSlice, TEAM_COLOR_PALETTE } from '../lib/race-data'
 
 export const Route = createFileRoute('/admin')({
@@ -13,6 +14,46 @@ function AdminPage() {
   const [unlocked, setUnlocked] = useState(false)
   const [admin, setAdmin] = useState(defaultAdminState())
   const [teamsById, setTeamsById] = useState<Record<string, any>>({})
+  
+  // Get event from Convex
+  const event = useQuery('teams:getEventBySlug' as any, { slug: '24h-brette-les-pins-2026' })
+  
+  // Get teams from Convex
+  const teams = useQuery('teams:getTeams' as any, { eventId: event?._id || 'placeholder' })
+  
+  // Mutations
+  const createTeamMutation = useMutation('teams:createTeam' as any)
+  const updateTeamMutation = useMutation('teams:updateTeam' as any)
+  const deleteTeamMutation = useMutation('teams:deleteTeam' as any)
+
+  // Load teams from Convex when available
+  useEffect(() => {
+    if (teams && teams.length > 0) {
+      const teamsMap: Record<string, any> = {}
+      teams.forEach((team: any) => {
+        teamsMap[team._id] = {
+          ...emptyTeamSlice(),
+          info: {
+            id: team._id,
+            name: team.name,
+            maxRunners: team.maxRunners,
+            pin: team.pin,
+            category: team.category,
+            goalLaps: team.goalLaps,
+            color: team.color,
+            ready: team.ready,
+            contactName: team.contactName,
+            contactPhone: team.contactPhone,
+          },
+          runners: [],
+          order: [],
+          laps: [],
+          currentIdx: team.currentIdx,
+        }
+      })
+      setTeamsById(teamsMap)
+    }
+  }, [teams])
 
   // Check if already unlocked in localStorage
   useEffect(() => {
@@ -51,48 +92,63 @@ function AdminPage() {
     navigate({ to: '/' })
   }
 
-  // Team CRUD
-  const addTeam = () => {
-    const id = 'team_' + Date.now().toString(36)
+  // Team CRUD with Convex persistence
+  const addTeam = async () => {
+    if (!event?._id) {
+      pushToast('Événement non chargé', 'AlertTriangle')
+      return
+    }
+    
     const idx = Object.keys(teamsById).length
-    setTeamsById(prev => ({
-      ...prev,
-      [id]: {
-        ...emptyTeamSlice(),
-        info: {
-          ...emptyTeamSlice().info,
-          id,
-          name: `Équipe ${idx + 1}`,
-          maxRunners: 6,
-          pin: '0000',
-          category: 'Mixte',
-          goalLaps: 200,
-          color: TEAM_COLOR_PALETTE[idx % TEAM_COLOR_PALETTE.length],
-        },
-        runners: [],
-        order: [],
-        laps: [],
-        currentIdx: 0,
-      },
-    }))
-    pushToast('Équipe ajoutée', 'Plus')
+    const teamData = {
+      eventId: event._id,
+      name: `Équipe ${idx + 1}`,
+      category: 'Mixte',
+      color: TEAM_COLOR_PALETTE[idx % TEAM_COLOR_PALETTE.length],
+      maxRunners: 6,
+      goalLaps: 200,
+      pin: '0000',
+    }
+    
+    try {
+      const teamId = await createTeamMutation(teamData)
+      pushToast('Équipe ajoutée', 'Plus')
+    } catch (error) {
+      console.error('Error creating team:', error)
+      pushToast('Erreur lors de la création', 'AlertTriangle')
+    }
   }
 
-  const updateTeamInfo = (id: string, patch: any) => {
+  const updateTeamInfo = async (id: string, patch: any) => {
     setTeamsById(prev => {
       if (!prev[id]) return prev
       return { ...prev, [id]: { ...prev[id], info: { ...prev[id].info, ...patch } } }
     })
+    
+    // Persist to Convex
+    try {
+      await updateTeamMutation({ teamId: id, updates: patch })
+    } catch (error) {
+      console.error('Error updating team:', error)
+      pushToast('Erreur lors de la mise à jour', 'AlertTriangle')
+    }
   }
 
-  const removeTeam = (id: string) => {
+  const removeTeam = async (id: string) => {
     if (!window.confirm("Supprimer cette équipe et toutes ses données ?")) return
-    setTeamsById(prev => {
-      const cp = { ...prev }
-      delete cp[id]
-      return cp
-    })
-    pushToast('Équipe supprimée', 'Trash2')
+    
+    try {
+      await deleteTeamMutation({ teamId: id })
+      setTeamsById(prev => {
+        const cp = { ...prev }
+        delete cp[id]
+        return cp
+      })
+      pushToast('Équipe supprimée', 'Trash2')
+    } catch (error) {
+      console.error('Error deleting team:', error)
+      pushToast('Erreur lors de la suppression', 'AlertTriangle')
+    }
   }
 
   // Race controls

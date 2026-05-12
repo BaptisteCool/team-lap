@@ -1,30 +1,15 @@
 import { useEffect, useState } from 'react'
-import { fmtClock, kmPaceToLapMs, LAP_DISTANCE_M, TEAM_COLOR_PALETTE } from '../lib/race-data'
+import { useQuery } from '../convex/hooks'
+import { fmtClock, LAP_DISTANCE_M, TEAM_COLOR_PALETTE } from '../lib/race-data'
 import { GpxMap } from './GpxMap'
 
-interface Team {
-  info: {
-    id: string
-    name: string
-    category: string
-    color: string
-    ready?: boolean
-  }
-  runners: any[]
-  laps: any[]
-  order: any[]
-  currentIdx: number
-}
-
 interface HomeScreenProps {
-  teamsById: Record<string, Team>
   onPickTeam: (teamId: string) => void
   raceStarted: boolean
   raceStartTime: number | null
 }
 
-export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }: HomeScreenProps) {
-  const teams = Object.values(teamsById)
+export function HomeScreen({ onPickTeam, raceStarted, raceStartTime }: HomeScreenProps) {
   const [now, setNow] = useState(Date.now())
 
   useEffect(() => {
@@ -32,15 +17,21 @@ export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }
     return () => clearInterval(id)
   }, [])
 
+  // Get the event by slug
+  const event = useQuery('teams:getEventBySlug' as any, { slug: '24h-brette-les-pins-2026' })
+  
+  // Get all teams for the event
+  const teams = useQuery('teams:getTeams' as any, { eventId: event?._id || 'placeholder' })
+
   const elapsedMs = raceStarted && raceStartTime ? Math.max(0, now - raceStartTime) : 0
 
-  const markers = teams
-    .filter(t => (t.runners || []).length > 0)
+  const markers = (teams || [])
+    .filter(t => t.ready)
     .map(t => ({
-      id: t.info.id,
-      color: t.info.color || TEAM_COLOR_PALETTE[0],
-      progress: computeTeamProgress(t, raceStarted, raceStartTime, now, kmPaceToLapMs),
-      label: t.info.name || '',
+      id: t._id,
+      color: t.color || TEAM_COLOR_PALETTE[0],
+      progress: 0.5, // Placeholder progress
+      label: t.name || '',
     }))
 
   return (
@@ -65,16 +56,16 @@ export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }
         <div className="card">
           <div className="card-head">
             <span>👥</span>
-            <h3>Équipes inscrites · {teams.length}</h3>
+            <h3>Équipes inscrites · {teams?.length || 0}</h3>
           </div>
           <div className="card-body">
-            {teams.length === 0 && <div className="empty">Aucune équipe enregistrée.</div>}
-            {teams.length > 0 && (
+            {!teams || teams.length === 0 && <div className="empty">Aucune équipe enregistrée.</div>}
+            {teams && teams.length > 0 && (
               <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                 {teams.map(t => (
                   <button
-                    key={t.info.id}
-                    onClick={() => onPickTeam(t.info.id)}
+                    key={t._id}
+                    onClick={() => onPickTeam(t._id)}
                     className="card"
                     style={{
                       background: 'var(--bg-2)',
@@ -85,7 +76,7 @@ export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }
                       display: 'grid',
                       gap: 8,
                       border: '1px solid var(--border)',
-                      borderLeft: `4px solid ${t.info.color || 'var(--accent)'}`,
+                      borderLeft: `4px solid ${t.color || 'var(--accent)'}`,
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -94,7 +85,7 @@ export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }
                           width: 36,
                           height: 36,
                           borderRadius: 10,
-                          background: t.info.color || 'var(--accent)',
+                          background: t.color || 'var(--accent)',
                           color: '#0a0e0c',
                           display: 'grid',
                           placeItems: 'center',
@@ -102,7 +93,7 @@ export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }
                         }}
                         className="mono"
                       >
-                        {t.info.name ? t.info.name.charAt(0).toUpperCase() : '?'}
+                        {t.name ? t.name.charAt(0).toUpperCase() : '?'}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div
@@ -114,11 +105,11 @@ export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }
                             textOverflow: 'ellipsis',
                           }}
                         >
-                          {t.info.name || '(sans nom)'}
+                          {t.name || '(sans nom)'}
                         </div>
-                        <div className="hint">{t.info.category}</div>
+                        <div className="hint">{t.category}</div>
                       </div>
-                      {!raceStarted && t.info?.ready && (
+                      {!raceStarted && t.ready && (
                         <span className="badge accent" style={{ fontSize: 10, padding: '2px 6px' }}>
                           ✓ prêt
                         </span>
@@ -126,9 +117,9 @@ export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }
                       <span>🔒</span>
                     </div>
                     <div style={{ display: 'flex', gap: 8, fontSize: 12, color: 'var(--muted)' }} className="mono">
-                      <span>{(t.runners || []).length} coureur(s)</span>
+                      <span>{t.maxRunners} coureur(s) max</span>
                       <span>·</span>
-                      <span>{(t.laps || []).length} tour(s)</span>
+                      <span>{t.goalLaps} tours objectif</span>
                     </div>
                   </button>
                 ))}
@@ -139,40 +130,4 @@ export function HomeScreen({ teamsById, onPickTeam, raceStarted, raceStartTime }
       </div>
     </div>
   )
-}
-
-// Helper function to compute team progress
-function computeTeamProgress(
-  team: Team,
-  raceStarted: boolean,
-  raceStartTime: number | null,
-  now: number,
-  kmPaceToLapMsFn: (kmMin: number, kmSec: number) => number
-): number {
-  if (!raceStarted || !raceStartTime) return 0
-  const laps = team.laps || []
-  const order = team.order || []
-  const runners = team.runners || []
-  if (order.length === 0) return 0
-
-  const lastLapAt = laps.length ? laps[laps.length - 1].timestamp : raceStartTime
-  const currentRunnerId = order[(team.currentIdx || 0) % order.length]
-  const runner = runners.find((r: any) => r.id === currentRunnerId)
-  if (!runner) return 0
-
-  const lastLap = laps.length ? laps[laps.length - 1] : null
-  let expectedLapMs: number
-
-  if (runner.liveKmMin != null) {
-    expectedLapMs = kmPaceToLapMsFn(runner.liveKmMin, runner.liveKmSec)
-  } else if (lastLap && lastLap.runnerId === runner.id) {
-    expectedLapMs = lastLap.lapTime
-  } else {
-    expectedLapMs = kmPaceToLapMsFn(runner.kmMin, runner.kmSec)
-  }
-
-  if (!expectedLapMs || expectedLapMs <= 0) return 0
-
-  const elapsed = Math.max(0, now - lastLapAt)
-  return elapsed / expectedLapMs
 }
