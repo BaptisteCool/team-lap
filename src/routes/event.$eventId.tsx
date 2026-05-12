@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
+import { LiveScreen } from '../components/LiveScreen'
 import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
 import { DEFAULT_RUNNERS, TEAM_COLOR_PALETTE, emptyTeamSlice } from '../lib/race-data'
@@ -22,6 +23,7 @@ function EventPage() {
     category: 'Mixte',
     goalLaps: 200,
     color: TEAM_COLOR_PALETTE[0],
+    ready: false,
   })
 
   // Demo runners data
@@ -29,6 +31,14 @@ function EventPage() {
 
   // Order of runners for relay
   const [order, setOrder] = useState<string[]>(DEFAULT_RUNNERS.slice(0, 6).map(r => r.id))
+
+  // Race state
+  const [race, setRace] = useState<any>({
+    started: false,
+    startTime: null,
+    laps: [],
+    currentIdx: 0,
+  })
 
   // Current screen: 'setup' | 'planning' | 'live'
   const [screen, setScreen] = useState<'setup' | 'planning' | 'live'>('setup')
@@ -46,7 +56,6 @@ function EventPage() {
 
   const handleContinuePlanning = () => {
     setScreen('live')
-    alert('Tracker en direct (à implémenter)')
   }
 
   const handleBackLive = () => {
@@ -75,20 +84,13 @@ function EventPage() {
         />
       )}
       {screen === 'live' && (
-        <div className="page">
-          <div className="card">
-            <div className="card-head">
-              <span>🏃</span>
-              <h3>Tracker en direct</h3>
-            </div>
-            <div className="card-body">
-              <p>Le tracker en direct sera implémenté prochainement.</p>
-              <button className="btn primary" onClick={handleBackLive}>
-                ← Retour au planning
-              </button>
-            </div>
-          </div>
-        </div>
+        <LiveScreen
+          runners={runners}
+          order={order}
+          race={race}
+          setRace={setRace}
+          onBack={handleBackLive}
+        />
       )}
     </>
   )

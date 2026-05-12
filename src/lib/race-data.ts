@@ -9,6 +9,25 @@ export function fmtClock(ms: number): string {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
+// Format lap time to MM:SS.cs
+export function fmtLap(ms: number): string {
+  if (!ms || ms <= 0) return '—'
+  const totalSec = Math.floor(ms / 1000)
+  const m = Math.floor(totalSec / 60)
+  const s = totalSec % 60
+  const cs = Math.floor((ms % 1000) / 10)
+  return `${m}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`
+}
+
+// Format pace to min/km
+export function fmtPace(ms: number, distM = LAP_DISTANCE_M): string {
+  if (!ms || ms <= 0) return '—'
+  const secPerKm = (ms / 1000) * (1000 / distM)
+  const m = Math.floor(secPerKm / 60)
+  const s = Math.round(secPerKm % 60)
+  return `${m}:${String(s).padStart(2, '0')}/km`
+}
+
 // Convert km pace (min/km) to lap time in milliseconds
 export function kmPaceToLapMs(kmMin: number, kmSec: number, lapDistanceM = 900): number {
   const paceSeconds = kmMin * 60 + kmSec
