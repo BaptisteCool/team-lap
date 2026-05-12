@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import {
   SUPER_ADMIN_PIN,
   TEAM_CATEGORIES,
@@ -64,6 +65,7 @@ export function AdminScreen({
   resetRace,
   pushToast,
 }: AdminScreenProps) {
+  const navigate = useNavigate()
   const schedule = admin.schedule || { startISO: '', endISO: '' }
   const race = admin.race || { started: false, startTime: null }
   const interruptions = Array.isArray(admin.interruptions) ? admin.interruptions : []
@@ -632,7 +634,7 @@ export function AdminScreen({
                     borderLeft: `4px solid ${t.info.color || 'var(--accent)'}`,
                   }}
                 >
-                  <div style={{ display: 'grid', gridTemplateColumns: '32px 32px 1fr 36px', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '32px 32px 1fr auto 36px 36px', gap: 10, alignItems: 'center', marginBottom: 10 }}>
                     <span className="mono" style={{ color: 'var(--muted)' }}>{String(i + 1).padStart(2, '0')}</span>
                     <input
                       type="color"
@@ -655,6 +657,44 @@ export function AdminScreen({
                       placeholder="Nom de l'équipe"
                       style={{ fontSize: 15, fontWeight: 500 }}
                     />
+                    {!race.started && (
+                      <button
+                        onClick={() => updateTeamInfo(t.info.id, { ready: !t.info.ready })}
+                        title={t.info.ready ? "Marquer non-prête" : "Marquer prête au départ"}
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          padding: '6px 12px',
+                          borderRadius: 999,
+                          cursor: 'pointer',
+                          background: t.info.ready ? 'oklch(0.86 0.20 135)' : 'var(--bg-2)',
+                          color: t.info.ready ? '#0a0e0c' : 'var(--text-2)',
+                          border: '1px solid ' + (t.info.ready ? 'oklch(0.86 0.20 135)' : 'var(--border)'),
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {t.info.ready ? '✓ Prête' : 'Marquer prête'}
+                      </button>
+                    )}
+                    {race.started && (
+                      <span
+                        className="badge"
+                        style={{
+                          fontSize: 10,
+                          background: t.info.ready ? 'oklch(0.86 0.20 135 / 0.18)' : 'var(--bg-2)',
+                          color: t.info.ready ? 'oklch(0.92 0.20 135)' : 'var(--muted)',
+                        }}
+                      >
+                        {t.info.ready ? '✓ Prête' : 'Non prête'}
+                      </span>
+                    )}
+                    <button
+                      className="btn ghost icon"
+                      onClick={() => navigate({ to: '/team/$teamId', params: { teamId: t.info.id }, search: { tab: 'live', readonly: true } as any })}
+                      title="Voir l'équipe en lecture seule"
+                    >
+                      👁️
+                    </button>
                     <button className="btn ghost icon" onClick={() => removeTeam(t.info.id)} title="Supprimer">
                       🗑
                     </button>
@@ -680,14 +720,21 @@ export function AdminScreen({
                       />
                     </div>
                     <div className="field">
-                      <span className="field-label">Objectif tours</span>
-                      <input
-                        type="number"
-                        min="1"
+                      <span className="field-label">Objectif tours (auto)</span>
+                      <div
                         className="mono"
-                        value={t.info.goalLaps || 200}
-                        onChange={e => updateTeamInfo(t.info.id, { goalLaps: Math.max(1, +e.target.value || 1) })}
-                      />
+                        style={{
+                          padding: '9px 10px',
+                          background: 'var(--bg-2)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 10,
+                          fontSize: 14,
+                          color: 'var(--text-2)',
+                        }}
+                        title="Calculé automatiquement avant le départ depuis l'allure × plannedLaps des coureurs. Verrouillé au top départ."
+                      >
+                        {t.info.goalLaps || '—'}
+                      </div>
                     </div>
                     <div className="field">
                       <span className="field-label">PIN équipe</span>

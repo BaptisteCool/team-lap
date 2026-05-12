@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as EventEventIdRouteImport } from './routes/event.$eventId'
+import { Route as TeamTeamIdRouteImport } from './routes/team.$teamId'
 
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
@@ -23,40 +23,40 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EventEventIdRoute = EventEventIdRouteImport.update({
-  id: '/event/$eventId',
-  path: '/event/$eventId',
+const TeamTeamIdRoute = TeamTeamIdRouteImport.update({
+  id: '/team/$teamId',
+  path: '/team/$teamId',
   getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/event/$eventId': typeof EventEventIdRoute
+  '/team/$teamId': typeof TeamTeamIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/event/$eventId': typeof EventEventIdRoute
+  '/team/$teamId': typeof TeamTeamIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/event/$eventId': typeof EventEventIdRoute
+  '/team/$teamId': typeof TeamTeamIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/event/$eventId'
+  fullPaths: '/' | '/admin' | '/team/$teamId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/event/$eventId'
-  id: '__root__' | '/' | '/admin' | '/event/$eventId'
+  to: '/' | '/admin' | '/team/$teamId'
+  id: '__root__' | '/' | '/admin' | '/team/$teamId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
-  EventEventIdRoute: typeof EventEventIdRoute
+  TeamTeamIdRoute: typeof TeamTeamIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,11 +75,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/event/$eventId': {
-      id: '/event/$eventId'
-      path: '/event/$eventId'
-      fullPath: '/event/$eventId'
-      preLoaderRoute: typeof EventEventIdRouteImport
+    '/team/$teamId': {
+      id: '/team/$teamId'
+      path: '/team/$teamId'
+      fullPath: '/team/$teamId'
+      preLoaderRoute: typeof TeamTeamIdRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -88,7 +88,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
-  EventEventIdRoute: EventEventIdRoute,
+  TeamTeamIdRoute: TeamTeamIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

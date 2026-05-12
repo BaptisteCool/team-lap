@@ -16,20 +16,29 @@ interface GpxMapProps {
   markers?: Marker[]
 }
 
-export function GpxMap({ height = 220, marker, progress, showLabel = true, markers }: GpxMapProps) {
+export function GpxMap({ height, marker, progress, showLabel = true, markers }: GpxMapProps) {
   const pathRef = useRef<SVGPathElement>(null)
   const [computedMarker, setComputedMarker] = useState<{ x: number; y: number } | null>(null)
   const [computedMulti, setComputedMulti] = useState<Array<Marker & { x: number; y: number }>>([])
+  // Track which marker ids have been positioned at least once — to skip transition on first paint
+  const seenIdsRef = useRef<Set<string>>(new Set())
+  const [, setSeenVersion] = useState(0)
+  const [singleSeen, setSingleSeen] = useState(false)
 
   useEffect(() => {
     if (progress == null || !pathRef.current) {
       setComputedMarker(null)
+      setSingleSeen(false)
       return
     }
     const len = pathRef.current.getTotalLength()
-    const p = ((progress % 1) + 1) % 1 // wrap into [0,1)
+    const p = ((progress % 1) + 1) % 1
     const pt = pathRef.current.getPointAtLength(len * p)
     setComputedMarker({ x: pt.x, y: pt.y })
+    if (!singleSeen) {
+      // Enable transition after first paint
+      requestAnimationFrame(() => setSingleSeen(true))
+    }
   }, [progress])
 
   useEffect(() => {
@@ -44,12 +53,20 @@ export function GpxMap({ height = 220, marker, progress, showLabel = true, marke
       return { ...mk, x: pt.x, y: pt.y }
     })
     setComputedMulti(computed)
+    // Mark new ids as seen on next frame so first paint skips transition
+    const newIds = computed.filter((mk) => !seenIdsRef.current.has(mk.id)).map((mk) => mk.id)
+    if (newIds.length > 0) {
+      requestAnimationFrame(() => {
+        for (const id of newIds) seenIdsRef.current.add(id)
+        setSeenVersion((v) => v + 1)
+      })
+    }
   }, [markers])
 
   const m = marker || computedMarker
 
   return (
-    <div className="map-wrap" style={{ height }}>
+    <div className="map-wrap" style={height ? { height } : undefined}>
       <svg viewBox={GPX_VIEWBOX} preserveAspectRatio="xMidYMid meet" style={{ height: '100%', width: '100%' }}>
         <defs>
           <linearGradient id="trackGrad" x1="0" y1="0" x2="1" y2="1">
@@ -74,26 +91,36 @@ export function GpxMap({ height = 220, marker, progress, showLabel = true, marke
           <circle r="3.5" fill="var(--accent)" stroke="var(--bg)" strokeWidth="1.5"/>
         </g>
         {m && (
-          <g transform={`translate(${m.x} ${m.y})`} style={{ transition: 'transform 240ms linear' }}>
-            <circle r="11" fill="var(--warn)" opacity="0.18">
-              <animate attributeName="r" values="9;13;9" dur="1.6s" repeatCount="indefinite"/>
+          <g
+            transform={`translate(${m.x} ${m.y})`}
+            style={{ transition: singleSeen ? 'transform 350ms linear' : 'none' }}
+          >
+            <circle r="14" fill="var(--warn)" opacity="0.18">
+              <animate attributeName="r" values="12;18;12" dur="1.6s" repeatCount="indefinite"/>
               <animate attributeName="opacity" values="0.25;0.05;0.25" dur="1.6s" repeatCount="indefinite"/>
             </circle>
-            <circle r="5" fill="var(--warn)" stroke="var(--bg)" strokeWidth="2"/>
+            <circle r="7" fill="var(--warn)" stroke="var(--bg)" strokeWidth="2"/>
           </g>
         )}
-        {computedMulti.map(mk => (
-          <g key={mk.id} transform={`translate(${mk.x} ${mk.y})`} style={{ transition: 'transform 1s linear' }}>
-            <circle r="10" fill={mk.color} opacity="0.18" />
-            <circle r="5.5" fill={mk.color} stroke="var(--bg)" strokeWidth="2" />
-            {mk.label && (
-              <text x="9" y="-7" fill="var(--text)" fontSize="9" fontWeight="600"
-                    style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, strokeLinejoin: 'round' }}>
-                {mk.label}
-              </text>
-            )}
-          </g>
-        ))}
+        {computedMulti.map(mk => {
+          const seen = seenIdsRef.current.has(mk.id)
+          return (
+            <g
+              key={mk.id}
+              transform={`translate(${mk.x} ${mk.y})`}
+              style={{ transition: seen ? 'transform 1s linear' : 'none' }}
+            >
+              <circle r="10" fill={mk.color} opacity="0.18" />
+              <circle r="5.5" fill={mk.color} stroke="var(--bg)" strokeWidth="2" />
+              {mk.label && (
+                <text x="9" y="-7" fill="var(--text)" fontSize="9" fontWeight="600"
+                      style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, strokeLinejoin: 'round' }}>
+                  {mk.label}
+                </text>
+              )}
+            </g>
+          )
+        })}
       </svg>
       {showLabel && (
         <div className="map-meta">{LAP_DISTANCE_M} m / tour · 56 pts GPX</div>

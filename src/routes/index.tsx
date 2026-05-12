@@ -10,14 +10,13 @@ export const Route = createFileRoute('/')({
     const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
 
     // Get the event by slug
-    const event = useQuery('events:getBySlug' as any, { slug: '24h-brette-les-pins-2026' })
-    
-    // Get all teams for the event
-    const teams = useQuery('teams:getTeams' as any, { eventId: event?._id || 'placeholder' }) as any[] | null | undefined
+    const event = useQuery('events:getBySlug' as any, { slug: '24h-brette-les-pins-2026' }) as any
 
-    // Get race state from admin (simplified for now)
-    const raceStarted = false
-    const raceStartTime = null
+    // Get all teams for the event
+    const teams = useQuery(
+      'teams:getTeams' as any,
+      event?._id ? { eventId: event._id } : 'skip',
+    ) as any[] | null | undefined
 
     const handlePickTeam = (teamId: string) => {
       const team = teams?.find(t => t._id === teamId)
@@ -28,7 +27,7 @@ export const Route = createFileRoute('/')({
 
     const handleUnlock = () => {
       if (selectedTeamId) {
-        navigate({ to: '/event/$eventId', params: { eventId: selectedTeamId } })
+        navigate({ to: '/team/$teamId', params: { teamId: selectedTeamId }, search: { tab: 'live', readonly: false } })
       }
     }
 
@@ -58,12 +57,6 @@ export const Route = createFileRoute('/')({
       )
     }
 
-    return (
-      <HomeScreen
-        onPickTeam={handlePickTeam}
-        raceStarted={raceStarted}
-        raceStartTime={raceStartTime}
-      />
-    )
+    return <HomeScreen onPickTeam={handlePickTeam} />
   },
 })

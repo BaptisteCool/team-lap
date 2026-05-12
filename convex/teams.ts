@@ -13,6 +13,30 @@ export const getTeams = query({
   },
 })
 
+// Get all teams + their runners + order (used by HomeScreen for live marker progress + card details)
+export const getTeamsFull = query({
+  args: { eventId: v.id('events') },
+  handler: async (ctx, args) => {
+    const teams = await ctx.db
+      .query('teams')
+      .withIndex('by_event', (q) => q.eq('eventId', args.eventId))
+      .collect()
+    const result = []
+    for (const team of teams) {
+      const runners = await ctx.db
+        .query('runners')
+        .withIndex('by_team', (q) => q.eq('teamId', team._id))
+        .collect()
+      const orderDoc = await ctx.db
+        .query('teamOrder')
+        .withIndex('by_team', (q) => q.eq('teamId', team._id))
+        .first()
+      result.push({ ...team, runners, order: orderDoc?.order || [] })
+    }
+    return result
+  },
+})
+
 // Get a single team with runners
 export const getTeam = query({
   args: { teamId: v.id('teams') },
@@ -25,7 +49,80 @@ export const getTeam = query({
       .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
       .collect()
 
-    return { ...team, runners }
+    const teamOrder = await ctx.db
+      .query('teamOrder')
+      .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
+      .first()
+
+    return { ...team, runners, order: teamOrder?.order || [] }
+  },
+})
+
+// Update or insert team order (relay sequence of runner local ids)
+export const setTeamOrder = mutation({
+  args: {
+    teamId: v.id('teams'),
+    order: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('teamOrder')
+      .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
+      .first()
+    if (existing) {
+      await ctx.db.patch(existing._id, { order: args.order })
+      return existing._id
+    }
+    return await ctx.db.insert('teamOrder', { teamId: args.teamId, order: args.order })
+  },
+})
+
+// Upsert runner: create or update by local string id
+export const upsertRunner = mutation({
+  args: {
+    teamId: v.id('teams'),
+    runner: v.object({
+      id: v.string(),
+      name: v.string(),
+      kmMin: v.number(),
+      kmSec: v.number(),
+      energy: v.number(),
+      plannedLaps: v.number(),
+      color: v.optional(v.string()),
+      status: v.optional(v.string()),
+      liveKmMin: v.optional(v.number()),
+      liveKmSec: v.optional(v.number()),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('runners')
+      .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
+      .collect()
+      .then((arr) => arr.find((r) => r.id === args.runner.id))
+    if (existing) {
+      await ctx.db.patch(existing._id, args.runner)
+      return existing._id
+    }
+    return await ctx.db.insert('runners', {
+      teamId: args.teamId,
+      ...args.runner,
+      createdAt: Date.now(),
+    })
+  },
+})
+
+// Delete runner by local string id
+export const deleteRunner = mutation({
+  args: { teamId: v.id('teams'), runnerLocalId: v.string() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query('runners')
+      .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
+      .collect()
+      .then((arr) => arr.find((r) => r.id === args.runnerLocalId))
+    if (existing) await ctx.db.delete(existing._id)
+    return args.runnerLocalId
   },
 })
 

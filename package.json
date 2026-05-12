@@ -9,7 +9,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "convex": "npx convex dev",
-    "seed": "tsx scripts/seed.ts",
+    "seed": "npx convex run seed:seedAll",
     "seed:convex": "npx convex dev --once && npm run seed"
   },
   "dependencies": {

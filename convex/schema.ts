@@ -109,10 +109,14 @@ export default defineSchema({
     
     // Energy level (affects pace estimation)
     energy: v.number(), // 0-100
-    
+
     // Planning
     plannedLaps: v.number(), // number of laps before relay
-    
+
+    // Display & race state
+    color: v.optional(v.string()),
+    status: v.optional(v.string()), // 'ready' | 'uncertain' | 'out'
+
     createdAt: v.number(),
   })
     .index('by_team', ['teamId']),

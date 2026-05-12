@@ -125,6 +125,28 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   background: var(--bg-2); color: var(--muted); font-weight: 600;
 }
 
+.team-tabs { width: 100%; }
+.team-tabs .tab { flex: 1 1 auto; justify-content: center; min-width: 0; }
+@media (max-width: 720px) {
+  .team-tabs .tab { padding: 8px 10px; font-size: 13px; }
+  .team-tabs .team-tab-label { display: none; }
+}
+
+/* Read-only mode — disable form interactions inside tab content (header/back stays usable) */
+.page.is-readonly .grid > :not(.card:first-child) input,
+.page.is-readonly .grid > :not(.card:first-child) select,
+.page.is-readonly .grid > :not(.card:first-child) textarea,
+.page.is-readonly .grid > :not(.card:first-child) button:not(.tab):not(.btn.ghost) {
+  pointer-events: none;
+  opacity: 0.6;
+}
+.page.is-readonly .ready-snackbar { display: none; }
+
+.live-map { width: 100%; }
+.live-map .map-wrap { height: 280px; }
+@media (min-width: 1024px) { .live-map .map-wrap { height: 380px; } }
+@media (min-width: 1440px) { .live-map .map-wrap { height: 460px; } }
+
 .topbar-spacer { flex: 1; }
 .live-pill {
   display: inline-flex; align-items: center; gap: 8px;
@@ -426,6 +448,59 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   background: var(--accent); color: var(--accent-ink);
   grid-column: 1 / -1;
   box-shadow: 0 0 0 1px var(--accent-line), 0 18px 40px -18px var(--accent);
+}
+
+/* Top passage = RED when next press should be a relai (0 laps left) */
+.big-btn.top.is-relay-imminent {
+  background: oklch(0.72 0.21 25); color: #fff;
+  box-shadow: 0 0 0 1px oklch(0.72 0.21 25 / 0.5), 0 18px 40px -18px oklch(0.72 0.21 25);
+}
+.big-btn.top.is-relay-imminent:hover:not(:disabled) { background: oklch(0.78 0.21 25); }
+
+/* Relai = ORANGE when there are still passages before relai */
+.big-btn.relay.is-warn {
+  background: oklch(0.78 0.18 80 / 0.18); color: oklch(0.92 0.16 80);
+  border-color: oklch(0.78 0.18 80 / 0.5);
+}
+.big-btn.relay.is-warn:hover:not(:disabled) { background: oklch(0.78 0.18 80 / 0.28); }
+
+/* Bottom snackbar — team ready toggle */
+.ready-snackbar {
+  position: fixed;
+  bottom: 16px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: 0 14px 30px -12px rgba(0,0,0,0.55);
+  max-width: calc(100vw - 32px);
+}
+.ready-snackbar.is-ready {
+  background: oklch(0.86 0.20 135 / 0.18);
+  border-color: oklch(0.86 0.20 135 / 0.5);
+}
+.ready-snackbar .ready-msg {
+  font-size: 13px; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ready-snackbar.is-ready .ready-msg { color: var(--accent); font-weight: 600; }
+.ready-snackbar .ready-btn {
+  background: var(--accent); color: var(--accent-ink);
+  border: none; border-radius: 999px;
+  padding: 6px 14px; font-size: 13px; font-weight: 600;
+  cursor: pointer; flex-shrink: 0;
+}
+.ready-snackbar .ready-btn:hover { background: oklch(0.90 0.20 135); }
+.ready-snackbar.is-ready .ready-btn {
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border);
+}
+@media (max-width: 720px) {
+  .ready-snackbar { font-size: 12px; padding: 8px 10px; gap: 8px; }
+  .ready-snackbar .ready-msg { font-size: 12px; max-width: 60vw; }
 }
 
 /* Ranking module */

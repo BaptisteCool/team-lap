@@ -53,9 +53,9 @@ export const ENERGY_LEVELS = [
 
 // Runner statuses
 export const STATUSES = [
-  { value: 'ready',     label: 'Prêt à courir', short: 'Prêt',     color: 'oklch(0.86 0.20 135)', icon: 'Check' },
-  { value: 'uncertain', label: 'Incertain',     short: 'Incertain',color: 'oklch(0.82 0.17 70)',  icon: 'HelpCircle' },
-  { value: 'out',       label: 'Abandon',       short: 'Abandon',  color: 'oklch(0.72 0.21 25)',  icon: 'XCircle' },
+  { value: 'ready',     label: 'Prêt à courir', short: 'Prêt',     color: 'oklch(0.86 0.20 135)', icon: '✓' },
+  { value: 'uncertain', label: 'Incertain',     short: 'Incertain',color: 'oklch(0.82 0.17 70)',  icon: '?' },
+  { value: 'out',       label: 'Abandon',       short: 'Abandon',  color: 'oklch(0.72 0.21 25)',  icon: '✕' },
 ] as const
 
 // Runner palette
@@ -138,6 +138,105 @@ export function toLocalDatetime(ms: number | null): string {
   const d = new Date(ms)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// Convert lap time (ms) → km pace (min/sec per km)
+export function lapMsToKmPace(lapMs: number, lapDistanceM = LAP_DISTANCE_M): { min: number; sec: number } {
+  if (!lapMs || lapMs <= 0) return { min: 0, sec: 0 }
+  const secPerKm = (lapMs / 1000) * (1000 / lapDistanceM)
+  const min = Math.floor(secPerKm / 60)
+  const sec = Math.round(secPerKm - min * 60)
+  return { min, sec }
+}
+
+// Format km pace (min/sec) as "M:SS/km"
+export function fmtKmPace(min: number, sec: number): string {
+  return `${min}:${String(sec).padStart(2, '0')}/km`
+}
+
+// Energy pace factor — slows base pace based on energy
+function energyPaceFactor(energy: number): number {
+  if (energy >= 100) return 1.0
+  if (energy >= 50) return 1.10
+  if (energy >= 25) return 1.25
+  return 1.40
+}
+
+// Compute live pace info for a runner
+export function getRunnerPace(
+  runner: { kmMin: number; kmSec: number; energy: number; liveKmMin?: number | null; liveKmSec?: number | null; id: string },
+  race: { laps?: any[] } | null | undefined,
+): { actualLapMs: number | null; baseLapMs: number; effectiveLapMs: number; source: 'override' | 'live' | 'base'; energyFactor: number; kmMin: number; kmSec: number } {
+  const rawBaseLapMs = kmPaceToLapMs(runner.kmMin, runner.kmSec)
+  const energyFactor = energyPaceFactor(runner.energy)
+  const baseLapMs = Math.round(rawBaseLapMs * energyFactor)
+  const real = race?.laps?.filter((l: any) => l.runnerId === runner.id) || []
+  const lastLap = real[real.length - 1]
+  const actualLapMs = lastLap ? lastLap.lapTime : null
+  // Reject absurd override (e.g. >15:00/km is unrealistic for a relay race)
+  const overrideSecPerKm = (runner.liveKmMin ?? 0) * 60 + (runner.liveKmSec ?? 0)
+  const isReasonableOverride =
+    runner.liveKmMin != null &&
+    runner.liveKmSec != null &&
+    overrideSecPerKm > 0 &&
+    overrideSecPerKm <= 15 * 60
+  const overrideLapMs = isReasonableOverride ? kmPaceToLapMs(runner.liveKmMin!, runner.liveKmSec!) : null
+  let effectiveLapMs: number, source: 'override' | 'live' | 'base'
+  if (overrideLapMs != null) { effectiveLapMs = overrideLapMs; source = 'override' }
+  else if (actualLapMs != null) { effectiveLapMs = actualLapMs; source = 'live' }
+  else { effectiveLapMs = baseLapMs; source = 'base' }
+  const km = lapMsToKmPace(effectiveLapMs)
+  return { actualLapMs, baseLapMs, effectiveLapMs, source, energyFactor, kmMin: km.min, kmSec: km.sec }
+}
+
+// Find next active runner index (skips status='out')
+export function nextActiveIdx(order: string[], runners: any[], fromIdx: number): number {
+  if (!order.length) return 0
+  for (let i = 1; i <= order.length; i++) {
+    const idx = (fromIdx + i) % order.length
+    const r = runners.find((x) => x.id === order[idx])
+    if (r && r.status !== 'out') return idx
+  }
+  return (fromIdx + 1) % order.length
+}
+
+// Estimate goal laps over 24h based on runners + order + plannedLaps per relay
+// Builds one cycle (each active runner × plannedLaps consecutive), computes its duration,
+// then projects how many cycles fit in 24h × laps per cycle.
+export function estimateGoalLaps(
+  runners: Array<{ id: string; kmMin: number; kmSec: number; plannedLaps?: number; status?: string }>,
+  order: string[],
+  raceDurationMs: number = 24 * 3600 * 1000,
+): number {
+  const activeOrder = order.filter((id) => {
+    const r = runners.find((x) => x.id === id)
+    return r && r.status !== 'out'
+  })
+  if (activeOrder.length === 0) return 0
+  let cycleMs = 0
+  let lapsPerCycle = 0
+  for (const id of activeOrder) {
+    const r = runners.find((x) => x.id === id)
+    if (!r) continue
+    const planned = Math.max(1, r.plannedLaps || 1)
+    const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+    cycleMs += lapMs * planned
+    lapsPerCycle += planned
+  }
+  if (cycleMs <= 0 || lapsPerCycle <= 0) return 0
+  const cycles = Math.floor(raceDurationMs / cycleMs)
+  return cycles * lapsPerCycle
+}
+
+// Lap type helpers (Convex types)
+export function isRelayType(t: string): boolean {
+  return t === 'relay_manual' || t === 'relay_auto' || t === 'relay'
+}
+export function isAutoType(t: string): boolean {
+  return t === 'checkpoint_auto' || t === 'relay_auto'
+}
+export function isManualType(t: string): boolean {
+  return t === 'checkpoint_manual' || t === 'relay_manual' || t === 'top' || t === 'relay'
 }
 
   // Empty team slice

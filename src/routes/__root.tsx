@@ -1,4 +1,6 @@
 import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
+import { useEffect } from 'react'
+import { useMutation } from '../convex/hooks'
 import { fmtClock } from '../lib/utils'
 
 export const Route = createRootRoute({
@@ -7,10 +9,22 @@ export const Route = createRootRoute({
     // const eventStatus = useQuery(api.functions.getEventStatus, { eventId: 'default' as any })
     const raceStarted = false
     const raceStartTime = null
-    
+
     const RACE_MS = 24 * 3600 * 1000
     const elapsed = 0
     const remaining = RACE_MS
+
+    // Client-side cron fallback — local Convex backend doesn't run scheduled crons.
+    // Fires immediately on mount + every 5s on every page; server-side debounced (MIN_LAP_GAP_MS=5s).
+    const autoTickMutation = useMutation('laps:autoTick' as any)
+    useEffect(() => {
+      // Immediate first tick so race-start auto-lap doesn't wait up to 5s extra
+      autoTickMutation({}).catch((e: any) => console.warn('autoTick failed:', e?.message || e))
+      const id = setInterval(() => {
+        autoTickMutation({}).catch((e: any) => console.warn('autoTick failed:', e?.message || e))
+      }, 5000)
+      return () => clearInterval(id)
+    }, [autoTickMutation])
     
     return (
       <div className="app">
