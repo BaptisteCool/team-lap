@@ -216,7 +216,7 @@ export function LiveScreen({ runners, order, race, setRace, onBack }: LiveScreen
               <GpxMap
                 height={180}
                 showLabel={false}
-                progress={race.started && expectedLapMs > 0 ? currentLapMs / expectedLapMs : null}
+                progress={race.started && expectedLapMs > 0 ? currentLapMs / expectedLapMs : undefined}
               />
               <div className="stat-row" style={{ marginTop: 12 }}>
                 <div className="stat" style={{ minWidth: 0 }}>
