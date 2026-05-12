@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
+import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
 import { DEFAULT_RUNNERS, TEAM_COLOR_PALETTE, emptyTeamSlice } from '../lib/race-data'
 
@@ -26,19 +27,69 @@ function EventPage() {
   // Demo runners data
   const [runners, setRunners] = useState<any>(DEFAULT_RUNNERS.slice(0, 6))
 
-  const handleContinue = () => {
-    console.log('Continue to planning', { team, runners })
-    // TODO: Navigate to planning screen
-    alert('Étape suivante : Planning (à implémenter)')
+  // Order of runners for relay
+  const [order, setOrder] = useState<string[]>(DEFAULT_RUNNERS.slice(0, 6).map(r => r.id))
+
+  // Current screen: 'setup' | 'planning' | 'live'
+  const [screen, setScreen] = useState<'setup' | 'planning' | 'live'>('setup')
+
+  // Schedule for planning
+  const [schedule] = useState({ startISO: '2026-05-16T15:00', endISO: '2026-05-17T15:00' })
+
+  const handleContinueSetup = () => {
+    setScreen('planning')
+  }
+
+  const handleBackPlanning = () => {
+    setScreen('setup')
+  }
+
+  const handleContinuePlanning = () => {
+    setScreen('live')
+    alert('Tracker en direct (à implémenter)')
+  }
+
+  const handleBackLive = () => {
+    setScreen('planning')
   }
 
   return (
-    <SetupScreen
-      team={team}
-      setTeam={setTeam}
-      runners={runners}
-      setRunners={setRunners}
-      onContinue={handleContinue}
-    />
+    <>
+      {screen === 'setup' && (
+        <SetupScreen
+          team={team}
+          setTeam={setTeam}
+          runners={runners}
+          setRunners={setRunners}
+          onContinue={handleContinueSetup}
+        />
+      )}
+      {screen === 'planning' && (
+        <PlanningScreen
+          runners={runners}
+          order={order}
+          setOrder={setOrder}
+          schedule={schedule}
+          onContinue={handleContinuePlanning}
+          onBack={handleBackPlanning}
+        />
+      )}
+      {screen === 'live' && (
+        <div className="page">
+          <div className="card">
+            <div className="card-head">
+              <span>🏃</span>
+              <h3>Tracker en direct</h3>
+            </div>
+            <div className="card-body">
+              <p>Le tracker en direct sera implémenté prochainement.</p>
+              <button className="btn primary" onClick={handleBackLive}>
+                ← Retour au planning
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
