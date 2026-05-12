@@ -140,25 +140,26 @@ export function toLocalDatetime(ms: number | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-// Empty team slice
-export function emptyTeamSlice() {
-  return {
-    info: {
-      id: '',
-      name: '',
-      maxRunners: 6,
-      pin: '0000',
-      category: 'Mixte',
-      goalLaps: 200,
-      color: TEAM_COLOR_PALETTE[0],
-    },
-    runners: [],
-    order: [],
-    laps: [],
-    currentIdx: 0,
-    ranking: { position: 1, gapPrev: '', gapNext: '', history: [] },
+  // Empty team slice
+  export function emptyTeamSlice() {
+    return {
+      info: {
+        id: '',
+        name: '',
+        maxRunners: 6,
+        pin: '0000',
+        category: 'Mixte',
+        goalLaps: 200,
+        color: TEAM_COLOR_PALETTE[0],
+        profileImage: undefined,
+      },
+      runners: [],
+      order: [],
+      laps: [],
+      currentIdx: 0,
+      ranking: { position: 1, gapPrev: '', gapNext: '', history: [] },
+    }
   }
-}
 
 // Admin state type
 export interface AdminState {

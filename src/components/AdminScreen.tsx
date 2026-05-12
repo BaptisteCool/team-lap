@@ -22,6 +22,7 @@ interface TeamInfo {
   goalLaps: number
   color: string
   ready?: boolean
+  profileImage?: string
   contactName?: string
   contactPhone?: string
 }
@@ -47,7 +48,6 @@ interface AdminScreenProps {
   correctActualStart: (isoString: string) => void
   resetRace: () => void
   pushToast: (text: string, icon?: string) => void
-  onLock: () => void
 }
 
 export function AdminScreen({
@@ -63,7 +63,6 @@ export function AdminScreen({
   correctActualStart,
   resetRace,
   pushToast,
-  onLock,
 }: AdminScreenProps) {
   const schedule = admin.schedule || { startISO: '', endISO: '' }
   const race = admin.race || { started: false, startTime: null }
@@ -724,6 +723,76 @@ export function AdminScreen({
                         placeholder="+33 6 12 34 56 78"
                         autoComplete="off"
                       />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 10 }}>
+                    <span className="field-label">Image de profil (optionnel)</span>
+                    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
+                      {t.info.profileImage ? (
+                        <img
+                          src={t.info.profileImage}
+                          alt={t.info.name}
+                          style={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: 10,
+                            objectFit: 'cover',
+                            border: '1px solid var(--border)',
+                          }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: 10,
+                            background: t.info.color || 'var(--accent)',
+                            color: '#0a0e0c',
+                            display: 'grid',
+                            placeItems: 'center',
+                            fontWeight: 700,
+                            fontSize: 18,
+                            border: '1px solid var(--border)',
+                          }}
+                          className="mono"
+                        >
+                          {t.info.name ? t.info.name.charAt(0).toUpperCase() : '?'}
+                        </div>
+                      )}
+                      <div style={{ flex: 1 }}>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={e => {
+                            const file = e.target.files?.[0]
+                            if (file) {
+                              const reader = new FileReader()
+                              reader.onload = (event) => {
+                                const result = event.target?.result as string
+                                updateTeamInfo(t.info.id, { profileImage: result })
+                              }
+                              reader.readAsDataURL(file)
+                            }
+                          }}
+                          style={{ fontSize: 12 }}
+                        />
+                        {t.info.profileImage && (
+                          <button
+                            onClick={() => updateTeamInfo(t.info.id, { profileImage: undefined })}
+                            style={{
+                              marginTop: 4,
+                              fontSize: 11,
+                              padding: '4px 8px',
+                              background: 'var(--bg-2)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 4,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Supprimer l'image
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="hint" style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>

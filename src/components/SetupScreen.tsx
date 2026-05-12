@@ -14,6 +14,9 @@ interface TeamInfo {
   category: string
   goalLaps: number
   color: string
+  profileImage?: string
+  contactName?: string
+  contactPhone?: string
 }
 
 interface Runner {
@@ -121,23 +124,38 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: 
             </div>
             <div className="card-body grid" style={{ gap: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                <div
-                  style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 12,
-                    background: team.color || 'var(--accent)',
-                    color: '#0a0e0c',
-                    display: 'grid',
-                    placeItems: 'center',
-                    fontWeight: 700,
-                    fontSize: 22,
-                    flexShrink: 0,
-                  }}
-                  className="mono"
-                >
-                  {team.name ? team.name.charAt(0).toUpperCase() : '?'}
-                </div>
+                {team.profileImage ? (
+                  <img
+                    src={team.profileImage}
+                    alt={team.name}
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 12,
+                      objectFit: 'cover',
+                      border: '1px solid var(--border)',
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 12,
+                      background: team.color || 'var(--accent)',
+                      color: '#0a0e0c',
+                      display: 'grid',
+                      placeItems: 'center',
+                      fontWeight: 700,
+                      fontSize: 22,
+                      flexShrink: 0,
+                    }}
+                    className="mono"
+                  >
+                    {team.name ? team.name.charAt(0).toUpperCase() : '?'}
+                  </div>
+                )}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
@@ -153,6 +171,67 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: 
                   <div className="hint" style={{ marginTop: 2 }}>
                     Couleur <span className="mono" style={{ color: 'var(--text-2)' }}>{team.color || '—'}</span>
                   </div>
+                </div>
+              </div>
+              <div>
+                <span className="field-label">Image de profil (optionnel)</span>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={e => {
+                        const file = e.target.files?.[0]
+                        if (file) {
+                          const reader = new FileReader()
+                          reader.onload = (event) => {
+                            const result = event.target?.result as string
+                            setTeam(t => ({ ...t, profileImage: result }))
+                          }
+                          reader.readAsDataURL(file)
+                        }
+                      }}
+                      style={{ fontSize: 12 }}
+                    />
+                    {team.profileImage && (
+                      <button
+                        onClick={() => setTeam(t => ({ ...t, profileImage: undefined }))}
+                        style={{
+                          marginTop: 4,
+                          fontSize: 11,
+                          padding: '4px 8px',
+                          background: 'var(--bg-2)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Supprimer l'image
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="field">
+                  <span className="field-label">Référent équipe (optionnel)</span>
+                  <input
+                    type="text"
+                    value={team.contactName || ''}
+                    onChange={e => setTeam(t => ({ ...t, contactName: e.target.value }))}
+                    placeholder="Prénom Nom"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="field">
+                  <span className="field-label">Téléphone référent (optionnel)</span>
+                  <input
+                    type="tel"
+                    value={team.contactPhone || ''}
+                    onChange={e => setTeam(t => ({ ...t, contactPhone: e.target.value }))}
+                    placeholder="+33 6 12 34 56 78"
+                    autoComplete="off"
+                  />
                 </div>
               </div>
               <div className="grid" style={{ gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>

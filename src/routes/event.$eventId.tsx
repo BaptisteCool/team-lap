@@ -1,8 +1,9 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { createFileRoute } from '@tanstack/react-router'
+import { useEffect, useRef, useState } from 'react'
 import { LiveScreen } from '../components/LiveScreen'
 import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
+import { useMutation, useQuery } from '../convex/hooks'
 import { DEFAULT_RUNNERS, TEAM_COLOR_PALETTE, emptyTeamSlice } from '../lib/race-data'
 
 export const Route = createFileRoute('/event/$eventId')({
@@ -11,9 +12,18 @@ export const Route = createFileRoute('/event/$eventId')({
 
 function EventPage() {
   const { eventId } = Route.useParams()
-  const navigate = useNavigate()
 
-  // Demo team data
+  // Get team data from Convex
+  const teamData = useQuery('teams:getTeam' as any, { teamId: eventId as any })
+
+  // Get runners from Convex
+  const runnersData = useQuery('teams:getTeam' as any, { teamId: eventId as any })
+
+  // Mutation for persisting team edits (image, contact)
+  const updateTeamMutation = useMutation('teams:updateTeam' as any)
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Local state for team
   const [team, setTeam] = useState<any>({
     ...emptyTeamSlice().info,
     id: eventId,
@@ -24,10 +34,61 @@ function EventPage() {
     goalLaps: 200,
     color: TEAM_COLOR_PALETTE[0],
     ready: false,
+    profileImage: undefined,
+    contactName: undefined,
+    contactPhone: undefined,
   })
 
-  // Demo runners data
+  // Local state for runners
   const [runners, setRunners] = useState<any>(DEFAULT_RUNNERS.slice(0, 6))
+
+  // Sync team data from Convex when available
+  useEffect(() => {
+    if (teamData) {
+      setTeam({
+        id: teamData._id,
+        name: teamData.name,
+        maxRunners: teamData.maxRunners,
+        pin: teamData.pin,
+        category: teamData.category,
+        goalLaps: teamData.goalLaps,
+        color: teamData.color,
+        ready: teamData.ready,
+        profileImage: teamData.profileImage,
+        contactName: teamData.contactName,
+        contactPhone: teamData.contactPhone,
+      })
+    }
+  }, [teamData])
+
+  // Wrap setTeam: keep local React state, debounce-persist editable fields to Convex
+  const setTeamPersist: typeof setTeam = (updater) => {
+    setTeam((prev: any) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater
+      if (teamData?._id) {
+        const patch: Record<string, any> = {}
+        if (next.profileImage !== prev.profileImage) patch.profileImage = next.profileImage
+        if (next.contactName !== prev.contactName) patch.contactName = next.contactName
+        if (next.contactPhone !== prev.contactPhone) patch.contactPhone = next.contactPhone
+        if (Object.keys(patch).length > 0) {
+          if (persistTimer.current) clearTimeout(persistTimer.current)
+          persistTimer.current = setTimeout(() => {
+            updateTeamMutation({ teamId: teamData._id, updates: patch }).catch((err: any) => {
+              console.error('Error persisting team edit:', err)
+            })
+          }, 400)
+        }
+      }
+      return next
+    })
+  }
+
+  // Sync runners from Convex when available
+  useEffect(() => {
+    if (runnersData?.runners && runnersData.runners.length > 0) {
+      setRunners(runnersData.runners)
+    }
+  }, [runnersData])
 
   // Order of runners for relay
   const [order, setOrder] = useState<string[]>(DEFAULT_RUNNERS.slice(0, 6).map(r => r.id))
@@ -67,7 +128,7 @@ function EventPage() {
       {screen === 'setup' && (
         <SetupScreen
           team={team}
-          setTeam={setTeam}
+          setTeam={setTeamPersist}
           runners={runners}
           setRunners={setRunners}
           onContinue={handleContinueSetup}

@@ -1,5 +1,4 @@
-import React from 'react'
-import { ENERGY_LEVELS } from '../lib/race-data'
+  import { ENERGY_LEVELS } from '../lib/race-data'
 
 interface EnergySegmentProps {
   value: number

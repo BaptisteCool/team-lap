@@ -75,6 +75,9 @@ export default defineSchema({
     maxRunners: v.number(),
     ready: v.boolean(), // marked as ready for race start
     
+    // Profile image (optional)
+    profileImage: v.optional(v.string()), // URL to team profile image
+    
     // Contact info
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),

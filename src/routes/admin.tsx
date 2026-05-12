@@ -16,7 +16,7 @@ function AdminPage() {
   const [teamsById, setTeamsById] = useState<Record<string, any>>({})
   
   // Get event from Convex
-  const event = useQuery('teams:getEventBySlug' as any, { slug: '24h-brette-les-pins-2026' })
+  const event = useQuery('events:getBySlug' as any, { slug: '24h-brette-les-pins-2026' })
   
   // Get teams from Convex
   const teams = useQuery('teams:getTeams' as any, { eventId: event?._id || 'placeholder' })
@@ -42,6 +42,7 @@ function AdminPage() {
             goalLaps: team.goalLaps,
             color: team.color,
             ready: team.ready,
+            profileImage: team.profileImage,
             contactName: team.contactName,
             contactPhone: team.contactPhone,
           },
@@ -84,14 +85,6 @@ function AdminPage() {
     navigate({ to: '/' })
   }
 
-  const handleLock = () => {
-    setUnlocked(false)
-    try {
-      localStorage.removeItem('teamlap.adminUnlocked')
-    } catch (_) {}
-    navigate({ to: '/' })
-  }
-
   // Team CRUD with Convex persistence
   const addTeam = async () => {
     if (!event?._id) {
@@ -111,7 +104,7 @@ function AdminPage() {
     }
     
     try {
-      const teamId = await createTeamMutation(teamData)
+      await createTeamMutation(teamData)
       pushToast('Équipe ajoutée', 'Plus')
     } catch (error) {
       console.error('Error creating team:', error)
@@ -224,7 +217,6 @@ function AdminPage() {
         correctActualStart={correctActualStart}
         resetRace={resetRace}
         pushToast={pushToast}
-        onLock={handleLock}
       />
       {/* Toast notifications */}
       <div className="toast-stack">

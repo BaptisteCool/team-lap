@@ -58,30 +58,33 @@ export const createTeam = mutation({
   },
 })
 
-// Update a team
-export const updateTeam = mutation({
-  args: {
-    teamId: v.id('teams'),
-    updates: v.object({
-      name: v.optional(v.string()),
-      category: v.optional(v.string()),
-      color: v.optional(v.string()),
-      maxRunners: v.optional(v.number()),
-      goalLaps: v.optional(v.number()),
-      pin: v.optional(v.string()),
-      ready: v.optional(v.boolean()),
-      currentIdx: v.optional(v.number()),
-    }),
-  },
-  handler: async (ctx, args) => {
-    const { teamId, updates } = args
-    await ctx.db.patch(teamId, {
-      ...updates,
-      updatedAt: Date.now(),
-    })
-    return teamId
-  },
-})
+  // Update a team
+  export const updateTeam = mutation({
+    args: {
+      teamId: v.id('teams'),
+      updates: v.object({
+        name: v.optional(v.string()),
+        category: v.optional(v.string()),
+        color: v.optional(v.string()),
+        maxRunners: v.optional(v.number()),
+        goalLaps: v.optional(v.number()),
+        pin: v.optional(v.string()),
+        ready: v.optional(v.boolean()),
+        currentIdx: v.optional(v.number()),
+        profileImage: v.optional(v.string()),
+        contactName: v.optional(v.string()),
+        contactPhone: v.optional(v.string()),
+      }),
+    },
+    handler: async (ctx, args) => {
+      const { teamId, updates } = args
+      await ctx.db.patch(teamId, {
+        ...updates,
+        updatedAt: Date.now(),
+      })
+      return teamId
+    },
+  })
 
 // Delete a team
 export const deleteTeam = mutation({
@@ -110,17 +113,5 @@ export const deleteTeam = mutation({
     // Delete the team
     await ctx.db.delete(args.teamId)
     return args.teamId
-  },
-})
-
-// Get event by slug
-export const getEventBySlug = query({
-  args: { slug: v.string() },
-  handler: async (ctx, args) => {
-    const event = await ctx.db
-      .query('events')
-      .withIndex('by_slug', (q) => q.eq('slug', args.slug))
-      .first()
-    return event
   },
 })

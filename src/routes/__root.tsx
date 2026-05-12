@@ -1,6 +1,5 @@
-import { fmtClock } from '../lib/utils'
 import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
-import React from 'react'
+import { fmtClock } from '../lib/utils'
 
 export const Route = createRootRoute({
   component: () => {
@@ -8,13 +7,6 @@ export const Route = createRootRoute({
     // const eventStatus = useQuery(api.functions.getEventStatus, { eventId: 'default' as any })
     const raceStarted = false
     const raceStartTime = null
-    
-    const [tickNow, setTickNow] = React.useState(Date.now())
-    
-    React.useEffect(() => {
-      const id = setInterval(() => setTickNow(Date.now()), 1000)
-      return () => clearInterval(id)
-    }, [])
     
     const RACE_MS = 24 * 3600 * 1000
     const elapsed = 0

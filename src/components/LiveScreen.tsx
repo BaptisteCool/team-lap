@@ -16,15 +16,6 @@ interface Runner {
   plannedLaps: number
 }
 
-interface Lap {
-  id: string
-  runnerId: string
-  timestamp: number
-  lapTime: number
-  type: 'top' | 'relay' | 'virtual' | 'position'
-  lapNumber: number | null
-}
-
 interface Race {
   started: boolean
   startTime: number | null
@@ -52,7 +43,6 @@ export function LiveScreen({ runners, order, race, setRace, onBack }: LiveScreen
 
   const RACE_DURATION_MS = 24 * 3600 * 1000
   const elapsed = race.started ? Math.min(now - (race.startTime || 0), RACE_DURATION_MS) : 0
-  const remaining = race.started ? Math.max(0, RACE_DURATION_MS - elapsed) : RACE_DURATION_MS
   const progress = race.started ? Math.min(1, elapsed / RACE_DURATION_MS) : 0
 
   function getRunner(id: string) {

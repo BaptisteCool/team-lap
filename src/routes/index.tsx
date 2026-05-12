@@ -1,54 +1,68 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
 import { HomeScreen } from '../components/HomeScreen'
-import { DEFAULT_RUNNERS, TEAM_COLOR_PALETTE, emptyTeamSlice } from '../lib/race-data'
+import { PinGate } from '../components/PinGate'
+import { useQuery } from '../convex/hooks'
 
 export const Route = createFileRoute('/')({
   component: function Index() {
-    // Demo data - will be replaced with Convex data
-    const teamsById = {
-      'team_1': {
-        ...emptyTeamSlice(),
-        info: {
-          ...emptyTeamSlice().info,
-          id: 'team_1',
-          name: 'Équipe Alpha',
-          category: 'Mixte',
-          color: TEAM_COLOR_PALETTE[0],
-          ready: true,
-        },
-        runners: DEFAULT_RUNNERS.slice(0, 6),
-        order: DEFAULT_RUNNERS.slice(0, 6).map(r => r.id),
-        laps: [],
-        currentIdx: 0,
-      },
-      'team_2': {
-        ...emptyTeamSlice(),
-        info: {
-          ...emptyTeamSlice().info,
-          id: 'team_2',
-          name: 'Équipe Beta',
-          category: 'Hommes',
-          color: TEAM_COLOR_PALETTE[1],
-          ready: true,
-        },
-        runners: DEFAULT_RUNNERS.slice(0, 6),
-        order: DEFAULT_RUNNERS.slice(0, 6).map(r => r.id),
-        laps: [],
-        currentIdx: 0,
-      },
-    }
+    const navigate = useNavigate()
+    const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
+
+    // Get the event by slug
+    const event = useQuery('events:getBySlug' as any, { slug: '24h-brette-les-pins-2026' })
+    
+    // Get all teams for the event
+    const teams = useQuery('teams:getTeams' as any, { eventId: event?._id || 'placeholder' }) as any[] | null | undefined
+
+    // Get race state from admin (simplified for now)
+    const raceStarted = false
+    const raceStartTime = null
 
     const handlePickTeam = (teamId: string) => {
-      console.log('Pick team:', teamId)
-      // TODO: Navigate to team page
+      const team = teams?.find(t => t._id === teamId)
+      if (team) {
+        setSelectedTeamId(teamId)
+      }
+    }
+
+    const handleUnlock = () => {
+      if (selectedTeamId) {
+        navigate({ to: '/event/$eventId', params: { eventId: selectedTeamId } })
+      }
+    }
+
+    const handleCancel = () => {
+      setSelectedTeamId(null)
+    }
+
+    // If a team is selected, show PIN gate
+    if (selectedTeamId) {
+      const team = teams?.find((t: any) => t._id === selectedTeamId)
+      if (!team) {
+        setSelectedTeamId(null)
+        return null
+      }
+
+      return (
+        <PinGate
+          title={`Accès équipe : ${team.name}`}
+          hint="Entrez le code PIN de votre équipe"
+          expected={team.pin}
+          onUnlock={handleUnlock}
+          onCancel={handleCancel}
+          numeric={true}
+          label="Code PIN"
+          minLength={4}
+        />
+      )
     }
 
     return (
       <HomeScreen
-        teamsById={teamsById}
         onPickTeam={handlePickTeam}
-        raceStarted={false}
-        raceStartTime={null}
+        raceStarted={raceStarted}
+        raceStartTime={raceStartTime}
       />
     )
   },
