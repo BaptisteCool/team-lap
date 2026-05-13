@@ -164,6 +164,30 @@ export const updateAdminPassword = mutation({
   },
 })
 
+export const updateReplaceAutoWindow = mutation({
+  args: { eventId: v.id('events'), seconds: v.number() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.eventId, {
+      replaceAutoWindowSec: Math.max(0, Math.round(args.seconds)),
+      updatedAt: Date.now(),
+    })
+  },
+})
+
+export const updateLapBounds = mutation({
+  args: {
+    eventId: v.id('events'),
+    minLapSec: v.optional(v.number()),
+    maxLapSec: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const patch: Record<string, any> = { updatedAt: Date.now() }
+    if (args.minLapSec !== undefined) patch.minLapSec = Math.max(0, Math.round(args.minLapSec))
+    if (args.maxLapSec !== undefined) patch.maxLapSec = Math.max(0, Math.round(args.maxLapSec))
+    await ctx.db.patch(args.eventId, patch)
+  },
+})
+
 // ─── Interruptions ─────────────────────────────────────────────────────────
 
 export const startInterruption = mutation({

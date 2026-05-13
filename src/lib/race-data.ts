@@ -47,8 +47,8 @@ export const LAP_DISTANCE_M_MEASURED = 934
 // Energy levels
 export const ENERGY_LEVELS = [
   { value: 100, label: 'Au top',         color: 'oklch(0.86 0.20 135)', short: '100%' },
-  { value: 50,  label: 'Un peu diminué', color: 'oklch(0.82 0.17 70)',  short: '50%'  },
-  { value: 25,  label: 'Très diminué',   color: 'oklch(0.72 0.21 25)',  short: '25%'  },
+  { value: 80,  label: 'Un peu diminué', color: 'oklch(0.82 0.17 70)',  short: '80%'  },
+  { value: 60,  label: 'Très diminué',   color: 'oklch(0.72 0.21 25)',  short: '60%'  },
 ] as const
 
 // Runner statuses
@@ -155,10 +155,11 @@ export function fmtKmPace(min: number, sec: number): string {
 }
 
 // Energy pace factor — slows base pace based on energy
+// 100% = au top (no slowdown), 80% = un peu diminué, 60% = très diminué
 function energyPaceFactor(energy: number): number {
   if (energy >= 100) return 1.0
-  if (energy >= 50) return 1.10
-  if (energy >= 25) return 1.25
+  if (energy >= 80) return 1.10
+  if (energy >= 60) return 1.25
   return 1.40
 }
 
@@ -172,13 +173,19 @@ export function getRunnerPace(
   const baseLapMs = Math.round(rawBaseLapMs * energyFactor)
   const real = race?.laps?.filter((l: any) => l.runnerId === runner.id) || []
   const lastLap = real[real.length - 1]
-  const actualLapMs = lastLap ? lastLap.lapTime : null
-  // Reject absurd override (e.g. >15:00/km is unrealistic for a relay race)
+  // Reject absurd lap pace (must be 2:00..15:00/km)
+  let actualLapMs: number | null = lastLap ? lastLap.lapTime : null
+  if (actualLapMs != null) {
+    const km = lapMsToKmPace(actualLapMs)
+    const sec = km.min * 60 + km.sec
+    if (sec < 2 * 60 || sec > 15 * 60) actualLapMs = null
+  }
+  // Reject absurd override (realistic human pace: 2:00/km .. 15:00/km)
   const overrideSecPerKm = (runner.liveKmMin ?? 0) * 60 + (runner.liveKmSec ?? 0)
   const isReasonableOverride =
     runner.liveKmMin != null &&
     runner.liveKmSec != null &&
-    overrideSecPerKm > 0 &&
+    overrideSecPerKm >= 2 * 60 &&
     overrideSecPerKm <= 15 * 60
   const overrideLapMs = isReasonableOverride ? kmPaceToLapMs(runner.liveKmMin!, runner.liveKmSec!) : null
   let effectiveLapMs: number, source: 'override' | 'live' | 'base'

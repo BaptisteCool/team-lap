@@ -30,6 +30,7 @@ interface Runner {
   liveKmMin: number | null
   liveKmSec: number | null
   plannedLaps: number
+  gender?: string
 }
 
 interface SetupScreenProps {
@@ -38,9 +39,21 @@ interface SetupScreenProps {
   runners: Runner[]
   setRunners: React.Dispatch<React.SetStateAction<Runner[]>>
   onContinue: () => void
+  minLapSec?: number
+  maxLapSec?: number
 }
 
-export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: SetupScreenProps) {
+export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, minLapSec = 165, maxLapSec = 480 }: SetupScreenProps) {
+  const [editPaceFor, setEditPaceFor] = React.useState<{ runnerId: string; min: number; sec: number } | null>(null)
+  const [editPlannedFor, setEditPlannedFor] = React.useState<string | null>(null)
+  const [addRunnerOpen, setAddRunnerOpen] = React.useState(false)
+  const [addPseudo, setAddPseudo] = React.useState('')
+  const [addGender, setAddGender] = React.useState<'Homme' | 'Femme' | 'Autre'>('Homme')
+  const [addPaceMin, setAddPaceMin] = React.useState(5)
+  const [addPaceSec, setAddPaceSec] = React.useState(0)
+  const [addPlanned, setAddPlanned] = React.useState(4)
+  // Compact mm:ss formatter for bounds display (no centiseconds)
+  const fmtMmSs = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`
   const maxRunners = team?.maxRunners || 30
   const atCap = runners.length >= maxRunners
 
@@ -48,25 +61,36 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: 
     setRunners(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)))
   }
 
-  function addRunner() {
+  function openAddRunner() {
     if (atCap) return
+    setAddPseudo('')
+    setAddGender('Homme')
+    setAddPaceMin(5)
+    setAddPaceSec(0)
+    setAddPlanned(DEFAULT_PLANNED_LAPS || 4)
+    setAddRunnerOpen(true)
+  }
+
+  function commitAddRunner() {
     const palette = RUNNER_PALETTE || ['#A6F060', '#60D9F0', '#F0A860', '#D060F0', '#F06080', '#F0E060', '#80F0C8', '#F08060']
     const id = 'r' + Date.now().toString(36)
     setRunners(rs => [
       ...rs,
       {
         id,
-        name: '',
-        kmMin: 5,
-        kmSec: 0,
+        name: addPseudo.trim(),
+        kmMin: addPaceMin,
+        kmSec: addPaceSec,
         color: palette[rs.length % palette.length],
         energy: 100,
         status: 'ready',
         liveKmMin: null,
         liveKmSec: null,
-        plannedLaps: DEFAULT_PLANNED_LAPS || 4,
+        plannedLaps: addPlanned,
+        gender: addGender,
       },
     ])
+    setAddRunnerOpen(false)
   }
 
   function removeRunner(id: string) {
@@ -219,7 +243,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: 
                     type="text"
                     value={team.contactName || ''}
                     onChange={e => setTeam(t => ({ ...t, contactName: e.target.value }))}
-                    placeholder="Prénom Nom"
+                    placeholder="Pseudo"
                     autoComplete="off"
                   />
                 </div>
@@ -322,7 +346,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: 
             <button
               className="btn primary"
               style={{ marginLeft: 'auto' }}
-              onClick={addRunner}
+              onClick={openAddRunner}
               disabled={atCap}
               title={atCap ? `Maximum ${maxRunners} coureurs atteint` : undefined}
             >
@@ -367,7 +391,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: 
                       <input
                         value={r.name}
                         onChange={e => updateRunner(r.id, { name: e.target.value })}
-                        placeholder="Prénom Nom"
+                        placeholder="Pseudo"
                         style={{ fontSize: 15, fontWeight: 500 }}
                       />
                       <button className="btn ghost icon" onClick={() => removeRunner(r.id)} title="Supprimer">
@@ -377,42 +401,109 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: 
                     <div style={{ padding: '0 12px 12px', display: 'grid', gridTemplateColumns: '180px 110px 1fr', gap: 14 }}>
                       <div className="field">
                         <span className="field-label">Allure / km (estimée)</span>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <input
-                            type="number"
-                            min="0"
-                            max="20"
-                            value={r.kmMin}
-                            onChange={e => updateRunner(r.id, { kmMin: Math.max(0, +e.target.value || 0) })}
-                            style={{ width: 56, textAlign: 'center' }}
-                            className="mono"
-                          />
-                          <span style={{ color: 'var(--muted)' }}>:</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="59"
-                            value={r.kmSec}
-                            onChange={e => updateRunner(r.id, { kmSec: Math.min(59, Math.max(0, +e.target.value || 0)) })}
-                            style={{ width: 56, textAlign: 'center' }}
-                            className="mono"
-                          />
-                          <span className="mono" style={{ color: 'var(--muted)', fontSize: 12, marginLeft: 6 }}>
-                            ≈ {fmtLap(lapMs)} / tour
-                          </span>
-                        </div>
+                        {(r.kmMin > 0 || r.kmSec > 0) ? (
+                          <button
+                            type="button"
+                            onClick={() => setEditPaceFor({ runnerId: r.id, min: r.kmMin, sec: r.kmSec })}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              background: 'var(--bg-2)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 8,
+                              padding: '8px 12px',
+                              cursor: 'pointer',
+                              font: 'inherit',
+                              color: 'inherit',
+                              textAlign: 'left',
+                            }}
+                            title="Modifier l'allure"
+                          >
+                            <span className="mono" style={{ fontSize: 14, fontWeight: 600 }}>
+                              {r.kmMin}:{String(r.kmSec).padStart(2, '0')}/km
+                            </span>
+                            <span className="mono" style={{ color: 'var(--muted)', fontSize: 12 }}>
+                              ≈ {fmtLap(lapMs)} / tour
+                            </span>
+                            <span style={{ marginLeft: 'auto', opacity: 0.5, fontSize: 11 }}>✎</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn"
+                            onClick={() => setEditPaceFor({ runnerId: r.id, min: 5, sec: 0 })}
+                            style={{ fontSize: 13 }}
+                          >
+                            ➕ Ajouter une allure
+                          </button>
+                        )}
                       </div>
-                      <div className="field">
+                      <div className="field" style={{ position: 'relative' }}>
                         <span className="field-label">Tours prévus</span>
-                        <input
-                          type="number"
-                          min="1"
-                          max="50"
-                          value={r.plannedLaps ?? 1}
-                          onChange={e => updateRunner(r.id, { plannedLaps: Math.max(1, +e.target.value || 1) })}
-                          style={{ width: 80, textAlign: 'center' }}
+                        <span
+                          onClick={() => setEditPlannedFor((cur) => (cur === r.id ? null : r.id))}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            cursor: 'pointer',
+                            padding: '8px 12px',
+                            background: 'var(--bg-2)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 8,
+                          }}
                           className="mono"
-                        />
+                          title="Cliquer pour modifier"
+                        >
+                          <strong style={{ fontSize: 14 }}>×{r.plannedLaps ?? 1}</strong>
+                          <span style={{ opacity: 0.5, fontSize: 11 }}>✎</span>
+                        </span>
+                        {editPlannedFor === r.id && (
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: 0,
+                              top: '100%',
+                              marginTop: 4,
+                              zIndex: 20,
+                              background: 'var(--surface)',
+                              border: '1px solid var(--border)',
+                              borderRadius: 8,
+                              padding: 6,
+                              display: 'flex',
+                              gap: 4,
+                              alignItems: 'center',
+                              boxShadow: '0 8px 22px -8px rgba(0,0,0,0.5)',
+                            }}
+                          >
+                            <button
+                              className="btn"
+                              style={{ padding: '4px 12px', fontSize: 16, fontWeight: 700 }}
+                              onClick={() => updateRunner(r.id, { plannedLaps: (r.plannedLaps || 1) + 1 })}
+                              title="Augmenter"
+                            >
+                              +
+                            </button>
+                            <button
+                              className="btn"
+                              style={{ padding: '4px 12px', fontSize: 16, fontWeight: 700 }}
+                              disabled={(r.plannedLaps || 1) <= 1}
+                              onClick={() => updateRunner(r.id, { plannedLaps: Math.max(1, (r.plannedLaps || 1) - 1) })}
+                              title="Diminuer (mini 1)"
+                            >
+                              −
+                            </button>
+                            <button
+                              className="btn ghost icon"
+                              style={{ padding: 4, fontSize: 12 }}
+                              onClick={() => setEditPlannedFor(null)}
+                              title="Fermer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         <div>
@@ -444,6 +535,193 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue }: 
           </div>
         </div>
       </div>
+
+      {addRunnerOpen && (() => {
+        const lapMs = kmPaceToLapMs(addPaceMin, addPaceSec)
+        const minMs = minLapSec * 1000
+        const maxMs = maxLapSec * 1000
+        const paceValid = lapMs >= minMs && lapMs <= maxMs
+        const valid = !!addPseudo.trim() && paceValid && addPlanned >= 1
+        return (
+          <div className="modal-backdrop" onClick={() => setAddRunnerOpen(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3>Ajouter un coureur</h3>
+                <button className="btn ghost icon" style={{ marginLeft: 'auto' }} onClick={() => setAddRunnerOpen(false)}>✕</button>
+              </div>
+              <div className="modal-body grid" style={{ gap: 12 }}>
+                <div className="field">
+                  <span className="field-label">Pseudo *</span>
+                  <input
+                    type="text"
+                    required
+                    value={addPseudo}
+                    onChange={(e) => setAddPseudo(e.target.value)}
+                    placeholder="Pseudo"
+                    autoFocus
+                  />
+                </div>
+                <div className="field">
+                  <span className="field-label">Genre *</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {(['Homme', 'Femme', 'Autre'] as const).map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setAddGender(g)}
+                        style={{
+                          padding: '6px 12px',
+                          borderRadius: 8,
+                          border: '1px solid ' + (addGender === g ? 'var(--accent)' : 'var(--border)'),
+                          background: addGender === g ? 'oklch(0.86 0.20 135 / 0.18)' : 'var(--bg-2)',
+                          color: addGender === g ? 'oklch(0.92 0.20 135)' : 'var(--text-2)',
+                          fontSize: 13,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="field">
+                  <span className="field-label">Allure /km (min : sec) *</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max="20"
+                      required
+                      className="mono"
+                      value={addPaceMin}
+                      onChange={(e) => setAddPaceMin(Math.max(0, +e.target.value || 0))}
+                      style={{ width: 70, textAlign: 'center' }}
+                    />
+                    <span>:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="59"
+                      required
+                      className="mono"
+                      value={addPaceSec}
+                      onChange={(e) => setAddPaceSec(Math.min(59, Math.max(0, +e.target.value || 0)))}
+                      style={{ width: 70, textAlign: 'center' }}
+                    />
+                  </div>
+                  {!paceValid && (
+                    <div className="hint" style={{ color: 'oklch(0.85 0.16 25)', marginTop: 4 }}>
+                      Tour estimé hors bornes admin ({fmtMmSs(minMs)} → {fmtMmSs(maxMs)}).
+                    </div>
+                  )}
+                </div>
+                <div className="field">
+                  <span className="field-label">Tours prévus *</span>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <button type="button" className="btn" style={{ padding: '4px 12px', fontSize: 16 }} onClick={() => setAddPlanned((n) => Math.max(1, n - 1))}>−</button>
+                    <input
+                      type="number"
+                      min="1"
+                      max="40"
+                      required
+                      className="mono"
+                      value={addPlanned}
+                      onChange={(e) => setAddPlanned(Math.max(1, Math.min(40, +e.target.value || 1)))}
+                      style={{ width: 80, textAlign: 'center' }}
+                    />
+                    <button type="button" className="btn" style={{ padding: '4px 12px', fontSize: 16 }} onClick={() => setAddPlanned((n) => Math.min(40, n + 1))}>+</button>
+                  </div>
+                </div>
+              </div>
+              <div className="modal-foot">
+                <button className="btn ghost" onClick={() => setAddRunnerOpen(false)}>Annuler</button>
+                <button className="btn primary" disabled={!valid} onClick={commitAddRunner}>
+                  ✓ Ajouter
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {editPaceFor && (() => {
+        const lapMs = kmPaceToLapMs(editPaceFor.min, editPaceFor.sec)
+        const minMs = minLapSec * 1000
+        const maxMs = maxLapSec * 1000
+        const valid = lapMs >= minMs && lapMs <= maxMs
+        const tooFast = lapMs > 0 && lapMs < minMs
+        const tooSlow = lapMs > maxMs
+        const runner = runners.find(rr => rr.id === editPaceFor.runnerId)
+        return (
+          <div className="modal-backdrop" onClick={() => setEditPaceFor(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <h3>Allure cible · {runner?.name || ''}</h3>
+                <button className="btn ghost icon" style={{ marginLeft: 'auto' }} onClick={() => setEditPaceFor(null)}>✕</button>
+              </div>
+              <div className="modal-body grid" style={{ gap: 12 }}>
+                <div className="hint">Saisissez l'allure cible /km. Sera utilisée pour les estimations et la projection des passages.</div>
+                <div className="field">
+                  <span className="field-label">Allure /km (min : sec)</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max="20"
+                      className="mono"
+                      value={editPaceFor.min}
+                      onChange={(e) => setEditPaceFor({ ...editPaceFor, min: Math.max(0, +e.target.value || 0) })}
+                      style={{ width: 80, textAlign: 'center', fontSize: 18 }}
+                    />
+                    <span style={{ fontSize: 20, color: 'var(--muted)' }}>:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="59"
+                      className="mono"
+                      value={editPaceFor.sec}
+                      onChange={(e) => setEditPaceFor({ ...editPaceFor, sec: Math.min(59, Math.max(0, +e.target.value || 0)) })}
+                      style={{ width: 80, textAlign: 'center', fontSize: 18 }}
+                    />
+                    <span style={{ marginLeft: 8, color: 'var(--muted)', fontSize: 13 }}>min : sec /km</span>
+                  </div>
+                </div>
+                {(() => {
+                  // Convert lap-time bounds back to pace /km for clearer hint
+                  const minPaceSec = Math.ceil(minLapSec / 0.9) // 165 / 0.9 = 183s = 3:03/km
+                  const maxPaceSec = Math.floor(maxLapSec / 0.9) // 480 / 0.9 = 533s = 8:53/km
+                  const fmtPaceMmSs = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+                  return (
+                    <>
+                      <div className="hint mono">
+                        Tour estimé : <strong>{fmtMmSs(lapMs)}</strong> · bornes tour <strong>{fmtMmSs(minMs)} → {fmtMmSs(maxMs)}</strong>
+                      </div>
+                      <div className="hint mono">
+                        Allure autorisée : <strong>{fmtPaceMmSs(minPaceSec)}/km → {fmtPaceMmSs(maxPaceSec)}/km</strong>
+                      </div>
+                      {tooFast && <div className="hint" style={{ color: 'oklch(0.85 0.16 25)' }}>⚠️ Allure trop rapide — minimum {fmtPaceMmSs(minPaceSec)}/km (tour {fmtMmSs(minMs)}).</div>}
+                      {tooSlow && <div className="hint" style={{ color: 'oklch(0.85 0.16 25)' }}>⚠️ Allure trop lente — maximum {fmtPaceMmSs(maxPaceSec)}/km (tour {fmtMmSs(maxMs)}).</div>}
+                    </>
+                  )
+                })()}
+              </div>
+              <div className="modal-foot">
+                <button className="btn ghost" onClick={() => setEditPaceFor(null)}>Annuler</button>
+                <button
+                  className="btn primary"
+                  disabled={!valid}
+                  onClick={() => {
+                    updateRunner(editPaceFor.runnerId, { kmMin: editPaceFor.min, kmSec: editPaceFor.sec })
+                    setEditPaceFor(null)
+                  }}
+                >
+                  ✓ Enregistrer
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

@@ -58,6 +58,14 @@ export const getTeam = query({
   },
 })
 
+// Pause / resume cron auto-laps for a team
+export const setAutoPaused = mutation({
+  args: { teamId: v.id('teams'), paused: v.boolean() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.teamId, { autoPaused: args.paused, updatedAt: Date.now() })
+  },
+})
+
 // Update or insert team order (relay sequence of runner local ids)
 export const setTeamOrder = mutation({
   args: {
@@ -90,6 +98,7 @@ export const upsertRunner = mutation({
       plannedLaps: v.number(),
       color: v.optional(v.string()),
       status: v.optional(v.string()),
+      gender: v.optional(v.string()),
       liveKmMin: v.optional(v.number()),
       liveKmSec: v.optional(v.number()),
     }),
@@ -168,6 +177,7 @@ export const createTeam = mutation({
         pin: v.optional(v.string()),
         ready: v.optional(v.boolean()),
         currentIdx: v.optional(v.number()),
+        autoPaused: v.optional(v.boolean()),
         profileImage: v.optional(v.string()),
         contactName: v.optional(v.string()),
         contactPhone: v.optional(v.string()),

@@ -21,6 +21,7 @@ interface Schedule {
 
 interface PlanningScreenProps {
   runners: Runner[]
+  setRunners?: React.Dispatch<React.SetStateAction<Runner[]>>
   order: string[]
   setOrder: React.Dispatch<React.SetStateAction<string[]>>
   schedule: Schedule
@@ -28,9 +29,10 @@ interface PlanningScreenProps {
   onBack: () => void
 }
 
-export function PlanningScreen({ runners, order, setOrder, schedule, onContinue, onBack }: PlanningScreenProps) {
+export function PlanningScreen({ runners, setRunners, order, setOrder, schedule, onContinue, onBack }: PlanningScreenProps) {
   const dragId = useRef<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
+  const [editRunnerId, setEditRunnerId] = useState<string | null>(null)
 
   function getRunner(id: string) {
     return runners.find(r => r.id === id)
@@ -166,12 +168,76 @@ export function PlanningScreen({ runners, order, setOrder, schedule, onContinue,
                       <StatusChip value={r.status} />
                       <EnergyBar value={r.energy} />
                     </span>
-                    <span className="plan-pace">
+                    <span className="plan-pace" style={{ position: 'relative' }}>
                       {fmtKmPace(r.kmMin, r.kmSec)}{' '}
                       <span style={{ color: 'var(--muted)' }}>· {fmtLap(lapMs)}</span>
-                      <span style={{ marginLeft: 8, color: 'var(--accent)' }} className="mono">
+                      <span
+                        style={{ marginLeft: 8, color: 'var(--accent)', cursor: setRunners ? 'pointer' : 'default' }}
+                        className="mono"
+                        onClick={() => setRunners && setEditRunnerId((cur) => (cur === id ? null : id))}
+                        title={setRunners ? 'Cliquer pour modifier le nombre de tours prévus' : undefined}
+                      >
                         ×{r.plannedLaps || 1}
                       </span>
+                      {setRunners && (
+                        <button
+                          className="btn ghost icon"
+                          style={{ padding: 2, fontSize: 11, opacity: 0.6, marginLeft: 4 }}
+                          onClick={() => setEditRunnerId((cur) => (cur === id ? null : id))}
+                          title="Modifier le nombre de tours prévus"
+                        >
+                          ✎
+                        </button>
+                      )}
+                      {editRunnerId === id && setRunners && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: 0,
+                            top: '100%',
+                            marginTop: 4,
+                            zIndex: 20,
+                            background: 'var(--surface)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 8,
+                            padding: 6,
+                            display: 'flex',
+                            gap: 4,
+                            alignItems: 'center',
+                            boxShadow: '0 8px 22px -8px rgba(0,0,0,0.5)',
+                          }}
+                        >
+                          <button
+                            className="btn"
+                            style={{ padding: '4px 12px', fontSize: 16, fontWeight: 700 }}
+                            onClick={() => {
+                              setRunners((rs) => rs.map((rr) => rr.id === id ? { ...rr, plannedLaps: (rr.plannedLaps || 1) + 1 } : rr))
+                            }}
+                            title="Augmenter"
+                          >
+                            +
+                          </button>
+                          <button
+                            className="btn"
+                            style={{ padding: '4px 12px', fontSize: 16, fontWeight: 700 }}
+                            disabled={(r.plannedLaps || 1) <= 1}
+                            onClick={() => {
+                              setRunners((rs) => rs.map((rr) => rr.id === id ? { ...rr, plannedLaps: Math.max(1, (rr.plannedLaps || 1) - 1) } : rr))
+                            }}
+                            title="Diminuer (mini 1)"
+                          >
+                            −
+                          </button>
+                          <button
+                            className="btn ghost icon"
+                            style={{ padding: 4, fontSize: 12 }}
+                            onClick={() => setEditRunnerId(null)}
+                            title="Fermer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
                     </span>
                     <div style={{ display: 'flex', gap: 2 }}>
                       <button className="btn ghost icon" onClick={() => move(id, -1)} disabled={idx === 0} title="Monter">

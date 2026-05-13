@@ -47,9 +47,13 @@ function TeamPage() {
   const updateTeamMutation = useMutation('teams:updateTeam' as any)
   const recordLapMutation = useMutation('laps:recordLap' as any)
   const deleteLapMutation = useMutation('laps:deleteLap' as any)
+  const updateLapMutation = useMutation('laps:updateLap' as any)
+  const insertLapAtMutation = useMutation('laps:insertLapAt' as any)
+  const addBulkRelayMutation = useMutation('laps:addBulkRelay' as any)
   const setTeamOrderMutation = useMutation('teams:setTeamOrder' as any)
   const upsertRunnerMutation = useMutation('teams:upsertRunner' as any)
   const deleteRunnerMutation = useMutation('teams:deleteRunner' as any)
+  const setAutoPausedMutation = useMutation('teams:setAutoPaused' as any)
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const orderTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -66,6 +70,14 @@ function TeamPage() {
   })
   const [runners, setRunners] = useState<any>(DEFAULT_RUNNERS.slice(0, 6))
   const [order, setOrder] = useState<string[]>(DEFAULT_RUNNERS.slice(0, 6).map(r => r.id))
+  // Toast notifications (used by LiveScreen for delta vs estimation, etc.)
+  const [toasts, setToasts] = useState<Array<{ id: string; text: string; icon?: string; action?: { label: string; fn: () => void } }>>([])
+  const pushToast = (text: string, icon?: string, action?: { label: string; fn: () => void }) => {
+    const id = Math.random().toString(36).slice(2)
+    setToasts((s) => [...s, { id, text, icon, action }])
+    setTimeout(() => setToasts((s) => s.filter((t) => t.id !== id)), action ? 6000 : 3000)
+  }
+
   const [ranking, setRanking] = useState<{
     position: number
     totalTeams?: number
@@ -94,6 +106,7 @@ function TeamPage() {
         goalLaps: teamData.goalLaps,
         color: teamData.color,
         ready: teamData.ready,
+        autoPaused: teamData.autoPaused,
         profileImage: teamData.profileImage,
         contactName: teamData.contactName,
         contactPhone: teamData.contactPhone,
@@ -146,6 +159,7 @@ function TeamPage() {
                 plannedLaps: r.plannedLaps,
                 color: r.color,
                 status: r.status,
+                gender: r.gender,
                 liveKmMin: r.liveKmMin ?? undefined,
                 liveKmSec: r.liveKmSec ?? undefined,
               },
@@ -216,7 +230,8 @@ function TeamPage() {
     for (const r of teamData.runners as any[]) {
       if (r.liveKmMin == null || r.liveKmSec == null) continue
       const sec = (r.liveKmMin || 0) * 60 + (r.liveKmSec || 0)
-      if (sec > 15 * 60 || sec < 0) {
+      // Realistic human pace: 2:00/km .. 15:00/km. Anything outside = bad data → clear.
+      if (sec > 15 * 60 || sec < 2 * 60) {
         upsertRunnerMutation({
           teamId: teamData._id,
           runner: {
@@ -306,6 +321,23 @@ function TeamPage() {
                 👁️ LECTURE SEULE
               </span>
             )}
+            {!readonly && (
+              <button
+                className="btn ghost"
+                style={{ marginLeft: 'auto', fontSize: 12 }}
+                title="Verrouiller l'équipe — le PIN sera redemandé au prochain accès"
+                onClick={() => {
+                  if (!window.confirm("Verrouiller l'équipe ? Le PIN sera redemandé au prochain accès.")) return
+                  try {
+                    const pin = (team as any).pin || teamData?.pin
+                    if (pin) localStorage.removeItem(`teamlap.team.${teamId}.pin.${pin}`)
+                  } catch (_) {}
+                  navigate({ to: '/' })
+                }}
+              >
+                🔒 Verrouiller
+              </button>
+            )}
           </div>
           <div className="tabs team-tabs" role="tablist" style={{ marginTop: 10, overflowX: 'auto', flexWrap: 'wrap' }}>
             {TABS.map(t => (
@@ -330,11 +362,14 @@ function TeamPage() {
             runners={runners}
             setRunners={setRunnersPersist}
             onContinue={() => setActiveTab('planning')}
+            minLapSec={(event as any)?.minLapSec ?? 165}
+            maxLapSec={(event as any)?.maxLapSec ?? 480}
           />
         )}
         {activeTab === 'planning' && (
           <PlanningScreen
             runners={runners}
+            setRunners={setRunnersPersist}
             order={order}
             setOrder={setOrderPersist}
             schedule={schedule}
@@ -353,19 +388,115 @@ function TeamPage() {
             onBack={() => setActiveTab('planning')}
             team={team}
             setTeamReady={(ready) => setTeamPersist((t: any) => ({ ...t, ready }))}
+            onRecordLap={async (change, runnerId) => {
+              if (readonly || !teamData?._id) return undefined
+              try {
+                return await recordLapMutation({ teamId: teamData._id, change, runnerId })
+              } catch (err: any) {
+                console.error('recordLap:', err)
+                return undefined
+              }
+            }}
+            onUndoLap={(docId) => {
+              if (readonly) return
+              deleteLapMutation({ lapId: docId as any }).catch((err: any) => console.error('undo lap:', err))
+            }}
+            onUndoLastLap={() => {
+              if (readonly) return
+              const arr = (lapsData || []).filter((l: any) => l.type !== 'position').slice().sort((a: any, b: any) => a.timestamp - b.timestamp)
+              const last = arr[arr.length - 1]
+              if (!last?._id) return
+              deleteLapMutation({ lapId: last._id as any }).catch((err: any) => console.error('undo last lap:', err))
+            }}
+            onUpdateLapTime={(lapId, lapTimeMs) => {
+              if (readonly) return
+              updateLapMutation({ lapId: lapId as any, lapTime: lapTimeMs }).catch((err: any) =>
+                console.error('updateLap:', err),
+              )
+            }}
+            onSetCurrentIdx={(idx) => {
+              if (readonly || !teamData?._id) return
+              updateTeamMutation({ teamId: teamData._id, updates: { currentIdx: idx } }).catch((err: any) =>
+                console.error('set currentIdx:', err),
+              )
+            }}
+            replaceAutoWindowSec={(event as any)?.replaceAutoWindowSec ?? 180}
+            minLapSec={(event as any)?.minLapSec ?? 165}
+            pushToast={pushToast}
+            onSetAutoPaused={(paused) => {
+              if (readonly || !teamData?._id) return
+              setAutoPausedMutation({ teamId: teamData._id, paused }).catch((err: any) =>
+                console.error('setAutoPaused:', err),
+              )
+            }}
           />
         )}
         {activeTab === 'history' && (
           <HistoryScreen
             runners={runners}
+            runnersFull={runners}
             laps={lapsData || []}
             raceStartTime={event?.actualStart || null}
             raceStarted={race.started}
+            minLapSec={(event as any)?.minLapSec ?? 165}
+            maxLapSec={(event as any)?.maxLapSec ?? 480}
             ranking={ranking}
             setRanking={setRanking}
             onAddPosition={() => {}}
             onDeleteLap={(lapId) => {
+              if (readonly) return
+              if (!window.confirm('Supprimer ce tour ?')) return
               deleteLapMutation({ lapId: lapId as any }).catch((err: any) => console.error('delete lap:', err))
+            }}
+            onUpdateLap={(lapId, payload) => {
+              if (readonly) return
+              updateLapMutation({
+                lapId: lapId as any,
+                runnerId: payload.runnerId,
+                timestamp: payload.timestamp,
+                forcedExtra: payload.forcedExtra,
+                type: payload.type,
+              }).catch((err: any) => console.error('updateLap:', err))
+              if (payload.energy != null && teamData?._id) {
+                const r = (runners as any[]).find((x) => x.id === payload.runnerId)
+                if (r) {
+                  upsertRunnerMutation({
+                    teamId: teamData._id,
+                    runner: { ...r, energy: payload.energy },
+                  }).catch((err: any) => console.error('upsertRunner energy:', err))
+                }
+              }
+            }}
+            onAddBulkRelay={(p) => {
+              if (readonly || !teamData?._id) return
+              addBulkRelayMutation({
+                teamId: teamData._id,
+                runnerId: p.runnerId,
+                lapTimeMs: p.lapTimeMs,
+                anchorMs: p.anchorMs,
+                anchorKind: p.anchorKind,
+                nbLaps: p.nbLaps,
+                approximate: p.approximate,
+              }).catch((err: any) => console.error('addBulkRelay:', err))
+            }}
+            onInsertLap={(payload) => {
+              if (readonly || !teamData?._id) return
+              insertLapAtMutation({
+                teamId: teamData._id,
+                runnerId: payload.runnerId,
+                timestamp: payload.timestamp,
+                type: payload.type,
+                forcedExtra: payload.forcedExtra,
+              }).catch((err: any) => console.error('insertLapAt:', err))
+              if (payload.energy != null) {
+                const r = (runners as any[]).find((x) => x.id === payload.runnerId)
+                if (r) {
+                  upsertRunnerMutation({
+                    teamId: teamData._id,
+                    runner: { ...r, energy: payload.energy },
+                  }).catch((err: any) => console.error('upsertRunner energy:', err))
+                }
+              }
             }}
           />
         )}
@@ -393,6 +524,28 @@ function TeamPage() {
           </button>
         </div>
       )}
+
+      {/* Toast notifications */}
+      <div className="toast-stack">
+        {toasts.map((t) => (
+          <div key={t.id} className="toast">
+            <span className="toast-icon">{t.icon === 'Repeat' ? '🔁' : t.icon === 'Flag' ? '🏁' : '✓'}</span>
+            <span style={{ flex: 1 }}>{t.text}</span>
+            {t.action && (
+              <button
+                className="btn ghost"
+                style={{ padding: '4px 10px', fontSize: 12 }}
+                onClick={() => {
+                  t.action?.fn()
+                  setToasts((s) => s.filter((x) => x.id !== t.id))
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }

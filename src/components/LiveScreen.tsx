@@ -18,7 +18,6 @@ import { EnergySegment } from './EnergySegment'
 import { GpxMap } from './GpxMap'
 import { Modal } from './Modal'
 import { StatusChip } from './StatusChip'
-import { StatusSegment } from './StatusSegment'
 
 interface Runner {
   id: string
@@ -74,9 +73,18 @@ interface LiveScreenProps {
   ranking?: Ranking
   setRanking?: React.Dispatch<React.SetStateAction<Ranking>>
   onBack: () => void
-  team?: { name?: string; color?: string; ready?: boolean }
+  team?: { name?: string; color?: string; ready?: boolean; autoPaused?: boolean }
   setTeamReady?: (ready: boolean) => void
-  pushToast?: (text: string, icon?: string) => void
+  onRecordLap?: (change: boolean, runnerId: string) => Promise<{ docId?: any; lapId?: string } | unknown> | void
+  onUndoLap?: (docId: string) => void
+  onUndoLastLap?: () => void
+  onUpdateLapTime?: (lapId: string, lapTimeMs: number) => void
+  onSetCurrentIdx?: (idx: number) => void
+  onSetAutoPaused?: (paused: boolean) => void
+  replaceAutoWindowSec?: number
+  minLapSec?: number
+  maxLapSec?: number
+  pushToast?: (text: string, icon?: string, action?: { label: string; fn: () => void }) => void
 }
 
 export function LiveScreen({
@@ -89,20 +97,54 @@ export function LiveScreen({
   ranking,
   setRanking,
   onBack,
-  team: _team,
+  team,
   setTeamReady: _setTeamReady,
+  onRecordLap,
+  onUndoLap,
+  onUndoLastLap,
+  onUpdateLapTime,
+  onSetCurrentIdx,
+  onSetAutoPaused,
+  replaceAutoWindowSec,
+  minLapSec = 165,
+  maxLapSec = 480,
   pushToast,
 }: LiveScreenProps) {
-  const [now, setNow] = useState(Date.now())
+  const [nowReal, setNowReal] = useState(Date.now())
+  const [pausedAtMs, setPausedAtMs] = useState<number | null>(null)
   const lastRecordAtRef = useRef(0)
-  const MIN_LAP_GAP_MS = 5000
   const [pickerOpen, setPickerOpen] = useState<null | 'current' | 'reorder' | 'manage'>(null)
+  // Slide-to-unlock state: forces buttons enabled even outside the 45s window
+  const [forceUnlock, setForceUnlock] = useState(false)
+  const [slideVal, setSlideVal] = useState(0)
   const [editLapId, setEditLapId] = useState<string | null>(null)
+  const [editTimeFor, setEditTimeFor] = useState<{ lapId: string; lapNumber: number } | null>(null)
+  const [editMin, setEditMin] = useState(0)
+  const [editSec, setEditSec] = useState(0)
+  const [editPaceOpen, setEditPaceOpen] = useState(false)
+  const [editPaceMin, setEditPaceMin] = useState(0)
+  const [editPaceSec, setEditPaceSec] = useState(0)
+  const [relayEditOpen, setRelayEditOpen] = useState(false)
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 250)
+    const id = setInterval(() => setNowReal(Date.now()), 250)
     return () => clearInterval(id)
   }, [])
+
+  // Auto re-lock slider whenever a new lap is recorded (manual or auto) — buttons get blocked again
+  useEffect(() => {
+    setForceUnlock(false)
+    setSlideVal(0)
+  }, [race.laps.length])
+
+  // Track when team enters auto-paused state to freeze time displays
+  useEffect(() => {
+    if (team?.autoPaused && pausedAtMs == null) setPausedAtMs(Date.now())
+    if (!team?.autoPaused && pausedAtMs != null) setPausedAtMs(null)
+  }, [team?.autoPaused, pausedAtMs])
+
+  // "now" used for time computations: frozen at pausedAtMs while auto is paused
+  const now = team?.autoPaused && pausedAtMs != null ? pausedAtMs : nowReal
 
   const RACE_DURATION_MS = 24 * 3600 * 1000
   const elapsed = race.started && race.startTime ? Math.min(now - race.startTime, RACE_DURATION_MS) : 0
@@ -110,18 +152,21 @@ export function LiveScreen({
 
   function getRunner(id: string) { return runners.find(r => r.id === id) }
 
+  // DB-driven current runner (advances after manual / auto relay)
   const currentRunnerId = order[race.currentIdx % Math.max(1, order.length)]
   const currentRunner = getRunner(currentRunnerId)
   const nIdx = nextActiveIdx(order, runners, race.currentIdx)
   const nextRunner = getRunner(order[nIdx])
 
-  const lastLapAt = race.laps.length ? race.laps[race.laps.length - 1].timestamp : (race.startTime || 0)
-  const currentLapMs = race.started ? now - lastLapAt : 0
-
   const realLaps = race.laps.filter(l => l.type !== 'position')
-  const totalLaps = realLaps.length
-  const totalDistanceM = totalLaps * LAP_DISTANCE_M
-  const realAvgMs = totalLaps ? realLaps.reduce((a, l) => a + l.lapTime, 0) / totalLaps : 0
+  const dbTotalLaps = realLaps.length
+  const realAvgMs = dbTotalLaps ? realLaps.reduce((a, l) => a + l.lapTime, 0) / dbTotalLaps : 0
+  const totalDistanceM = dbTotalLaps * LAP_DISTANCE_M
+  const projTotalLaps = dbTotalLaps
+  // While the last lap is AUTO and within the admin replace window, treat it as tentative —
+  // buttons + display should keep the values they had BEFORE the auto fired, so a late runner
+  // can still click manually and the displayed ETAs stay stable.
+  function isAutoTypeStr(t: string) { return t === 'checkpoint_auto' || t === 'relay_auto' }
   const projectedLaps = realAvgMs ? Math.floor(RACE_DURATION_MS / realAvgMs) : 0
   const bestLap = realLaps.length ? realLaps.reduce((m, l) => (l.lapTime < m.lapTime ? l : m)) : null
 
@@ -153,59 +198,79 @@ export function LiveScreen({
 
   function recordLap(change: boolean) {
     const ts = Date.now()
-    if (ts - lastRecordAtRef.current < MIN_LAP_GAP_MS) {
-      pushToast && pushToast(`Trop rapide — attends ${Math.ceil((MIN_LAP_GAP_MS - (ts - lastRecordAtRef.current)) / 1000)}s`, 'AlertTriangle')
-      return
-    }
-    const lastInState = realLaps[realLaps.length - 1]
-    if (lastInState && ts - lastInState.timestamp < MIN_LAP_GAP_MS) {
-      pushToast && pushToast(`Trop rapide — attends ${Math.ceil((MIN_LAP_GAP_MS - (ts - lastInState.timestamp)) / 1000)}s`, 'AlertTriangle')
-      return
-    }
+    if (ts - lastRecordAtRef.current < 1000) return // tiny client-side debounce only
     lastRecordAtRef.current = ts
-    const nIdxLocal = change ? nextActiveIdx(order, runners, race.currentIdx) : race.currentIdx
-    const refTs = lastInState ? lastInState.timestamp : (race.startTime || 0)
-    const lapTime = ts - (refTs || 0)
-    const newLap: Lap = {
-      id: 'l' + ts,
-      runnerId: currentRunnerId,
-      timestamp: ts,
-      lapTime,
-      type: change ? 'relay_manual' : 'checkpoint_manual',
-      lapNumber: realLaps.length + 1,
-    }
-    setRace((r) => ({ ...r, laps: [...r.laps, newLap], currentIdx: nIdxLocal }))
-    pushToast && pushToast(change ? `Relais → ${getRunner(order[nIdxLocal])?.name}` : `Top — ${fmtLap(lapTime)}`, change ? 'Repeat' : 'Flag')
-
-    // Auto-calibrate: lap time becomes the runner's live pace ONLY if reasonable.
-    // Skip if abnormal (e.g. "démarrage tardif" where lapTime spans hours from race start).
-    if (setRunners && currentRunner) {
-      const expectedMs = kmPaceToLapMs(currentRunner.kmMin, currentRunner.kmSec)
-      const isReasonable = expectedMs > 0 && lapTime > 0 && lapTime <= expectedMs * 1.5
-      if (isReasonable) {
-        const km = lapMsToKmPace(lapTime)
-        setRunners((rs) => rs.map((rr) => (rr.id === currentRunnerId ? { ...rr, liveKmMin: km.min, liveKmSec: km.sec } : rr)))
+    // Note: plannedLaps n'est plus bumpé — chaque lap conserve son `plannedAtStart` (snapshot serveur)
+    // et les badges tour +/- sont dérivés de ce snapshot vs position dans le relai.
+    // Server handles: replace recent auto lap if within configured window, bypass server debounce for manual.
+    if (onRecordLap) {
+      const promise = onRecordLap(change, currentRunnerId)
+      // Compute delta vs estimation (effCurrentLapMs vs expectedLapMs from estim/live)
+      let deltaMsg = ''
+      if (expectedLapMs > 0 && effCurrentLapMs > 0) {
+        const deltaMs = effCurrentLapMs - expectedLapMs
+        const absSec = Math.abs(deltaMs) / 1000
+        const sign = deltaMs < 0 ? 'avance' : 'retard'
+        const fmtDelta = absSec >= 60
+          ? `${Math.floor(absSec / 60)}:${String(Math.round(absSec % 60)).padStart(2, '0')}`
+          : `${absSec.toFixed(1)}s`
+        if (absSec >= 1) deltaMsg = ` · ${sign} ${fmtDelta}`
       }
+      const baseMsg = change
+        ? `Relais → ${nextRunner?.name || '—'}`
+        : `Top — ${currentRunner?.name || '—'}`
+      // Await server result to retrieve the inserted lap docId, then offer Annuler action.
+      Promise.resolve(promise).then((res: any) => {
+        const docId = res?.docId
+        if (docId && pushToast && onUndoLap) {
+          pushToast(baseMsg + deltaMsg, change ? 'Repeat' : 'Flag', {
+            label: '↩ Annuler',
+            fn: () => onUndoLap(docId),
+          })
+        } else if (pushToast) {
+          pushToast(baseMsg + deltaMsg, change ? 'Repeat' : 'Flag')
+        }
+      }).catch(() => {
+        pushToast && pushToast(baseMsg + deltaMsg, change ? 'Repeat' : 'Flag')
+      })
     }
+    // Reset force-unlock after a successful manual click
+    setForceUnlock(false)
+    setSlideVal(0)
+    // Auto-calibration côté serveur uniquement (recordLap mutation) — évite race condition + lapTime erroné
+    // (le client peut voir un lap auto pas encore supprimé alors que le serveur le supprime puis recalcule)
   }
 
   function undoLap() {
     if (!race.laps.length) return
-    setRace((r) => {
-      const last = r.laps[r.laps.length - 1]
-      return {
-        ...r,
-        laps: r.laps.slice(0, -1),
-        currentIdx: isRelayType(last.type)
-          ? (r.currentIdx - 1 + order.length) % Math.max(1, order.length)
-          : r.currentIdx,
-      }
-    })
+    if (onUndoLastLap) {
+      onUndoLastLap()
+    } else {
+      // Fallback: shim-based optimistic update
+      setRace((r) => {
+        const last = r.laps[r.laps.length - 1]
+        return {
+          ...r,
+          laps: r.laps.slice(0, -1),
+          currentIdx: isRelayType(last.type)
+            ? (r.currentIdx - 1 + order.length) % Math.max(1, order.length)
+            : r.currentIdx,
+        }
+      })
+    }
     pushToast && pushToast('Dernière action annulée', 'Undo2')
   }
 
   function deleteLap(lapId: string) {
-    setRace((r) => ({ ...r, laps: r.laps.filter((l) => (l._id || l.id) !== lapId) }))
+    // Prefer direct callback (Convex docId) — fallback to setRace shim
+    if (onUndoLap && lapId.startsWith('k') /* Convex id heuristic */ === false) {
+      // The id passed is the convex _id; just delegate
+    }
+    if (onUndoLap) {
+      onUndoLap(lapId)
+    } else {
+      setRace((r) => ({ ...r, laps: r.laps.filter((l) => (l._id || l.id) !== lapId) }))
+    }
   }
 
   function changeLapRunner(lapId: string, newRunnerId: string) {
@@ -222,34 +287,58 @@ export function LiveScreen({
 
   function setCurrentTo(runnerId: string) {
     const idx = order.indexOf(runnerId)
-    if (idx >= 0) {
-      setRace((r) => ({ ...r, currentIdx: idx }))
-      pushToast && pushToast(`Coureur courant → ${getRunner(runnerId)?.name}`, 'UserCheck')
+    if (idx < 0) { setPickerOpen(null); return }
+    const target = getRunner(runnerId)
+    if (!window.confirm(`Mettre ${target?.name || '?'} comme coureur en piste ?\n\nL'ordre suivant sera repris à partir de lui.`)) {
+      setPickerOpen(null)
+      return
     }
+    if (onSetCurrentIdx) onSetCurrentIdx(idx)
+    else setRace((r) => ({ ...r, currentIdx: idx }))
+    pushToast && pushToast(`Coureur courant → ${target?.name}`, 'UserCheck')
     setPickerOpen(null)
   }
 
-  const expectedLapMs = currentRunner ? kmPaceToLapMs(getRunnerPace(currentRunner, race).kmMin, getRunnerPace(currentRunner, race).kmSec) : 0
-
-  // Calibration window — allow recording only inside 40-60% of cycle around estimated time
-  const timeSinceManual = race.started && relayStats.manualLastTs ? Math.max(0, now - relayStats.manualLastTs) : 0
-  const inCalibWindow = (() => {
-    if (!race.started || expectedLapMs <= 0) return false
-    const cycleIdx = Math.floor(timeSinceManual / expectedLapMs)
-    const cycleStart = cycleIdx * expectedLapMs
-    const tIn = timeSinceManual - cycleStart
-    return tIn >= 0.4 * expectedLapMs || tIn <= 0.6 * expectedLapMs
+  // Expected lap duration: prefer liveKm (auto-calibrated from last manual Top) if its lap is within admin bounds,
+  // else fallback to configured target (kmMin/kmSec). On relay, server clears liveKm → fallback applies.
+  const expectedLapMs = (() => {
+    if (!currentRunner) return 0
+    if (currentRunner.liveKmMin != null && currentRunner.liveKmSec != null) {
+      const liveLapMs = kmPaceToLapMs(currentRunner.liveKmMin, currentRunner.liveKmSec)
+      if (liveLapMs >= minLapSec * 1000 && liveLapMs <= maxLapSec * 1000) return liveLapMs
+    }
+    return kmPaceToLapMs(currentRunner.kmMin, currentRunner.kmSec)
   })()
-  const remainingToPassage = expectedLapMs > 0 ? expectedLapMs - currentLapMs : 0
+  // effCurrentLapMs = effective elapsed since last NON-tentative lap (so values stay stable during auto replace window)
+  // (effCurrentLapMs is computed below; alias here for downstream usage)
+
+  // Detect tentative auto: if last lap is AUTO and within admin replace window, treat as tentative
+  const replaceWindowMs = (replaceAutoWindowSec ?? 180) * 1000
+  const lastRealLap = realLaps[realLaps.length - 1]
+  const lastIsAuto = !!lastRealLap && isAutoTypeStr(lastRealLap.type)
+  const sinceLastLap = lastRealLap ? now - lastRealLap.timestamp : Infinity
+  const withinAutoReplace = lastIsAuto && sinceLastLap <= replaceWindowMs
+
+  // "Effective" reference: ignore the tentative auto so buttons keep previous values.
+  const effLaps = withinAutoReplace ? realLaps.slice(0, -1) : realLaps
+  const effLastLap = effLaps[effLaps.length - 1]
+  const effLastLapAt = effLastLap ? effLastLap.timestamp : (race.startTime || 0)
+  const effCurrentLapMs = race.started && effLastLapAt ? Math.max(0, now - effLastLapAt) : 0
+
+  // Click allowed within the last 45s before estimated lap end (faster cap),
+  // or right after an AUTO lap during the admin-defined replace window (so manual can replace it),
+  // or any time when slide-to-unlock is active.
+  const EARLY_CLICK_WINDOW_MS = 45_000
+  const inWindow = race.started && expectedLapMs > 0 && effCurrentLapMs >= expectedLapMs - EARLY_CLICK_WINDOW_MS
+  const canClick = race.started && (inWindow || forceUnlock || withinAutoReplace)
+  const remainingToPassage = expectedLapMs > 0 ? expectedLapMs - effCurrentLapMs : 0
   const plannedLaps = Math.max(1, currentRunner?.plannedLaps || 1)
   const lapsRemainingInRelay = Math.max(0, plannedLaps - relayStats.lapsThisRelay)
   // Fractional progress within current lap (0..1)
-  const currentLapProgress = expectedLapMs > 0 ? Math.min(1, currentLapMs / expectedLapMs) : 0
+  const currentLapProgress = expectedLapMs > 0 ? Math.min(1, effCurrentLapMs / expectedLapMs) : 0
   // Fractional remaining laps until relay (e.g. 1.3 = 1 full lap + 0.3 left of current)
   const fractionalRemaining = Math.max(0, lapsRemainingInRelay - currentLapProgress)
-  // "Tour en cours" — 1-based index of in-progress lap, capped at planned
-  const currentLapIndex = Math.min(plannedLaps, relayStats.lapsThisRelay + (lapsRemainingInRelay > 0 ? 1 : 0))
-  const etaRelay = lapsRemainingInRelay > 0 ? Math.max(0, lapsRemainingInRelay * expectedLapMs - currentLapMs) : 0
+  const etaRelay = lapsRemainingInRelay > 0 ? Math.max(0, lapsRemainingInRelay * expectedLapMs - effCurrentLapMs) : 0
 
   return (
     <div className="page">
@@ -260,7 +349,7 @@ export function LiveScreen({
             <div className="progress-track"><div className="progress-fill" style={{ width: `${progress * 100}%` }} /></div>
             <div style={{ display: 'flex', gap: 18, marginTop: 14, flexWrap: 'wrap', color: 'var(--muted)', fontSize: 13 }}>
               <span>📍 {(totalDistanceM / 1000).toFixed(2)} km parcourus</span>
-              <span>🏁 {totalLaps} tours</span>
+              <span>🏁 {projTotalLaps} tours</span>
               {realAvgMs > 0 && <span>⚡ Moy. {fmtLap(realAvgMs)}</span>}
               {projectedLaps > 0 && <span>🎯 Proj. {projectedLaps} t</span>}
             </div>
@@ -276,14 +365,56 @@ export function LiveScreen({
                     <StatusChip value={currentRunner.status} />
                     <EnergyBar value={currentRunner.energy} />
                     {(() => {
-                      const p = getRunnerPace(currentRunner, race)
+                      // Priority: explicit override (liveKm if reasonable) → last lap in current relay → cible config
+                      let lastLapInRelay: any = null
+                      for (let i = realLaps.length - 1; i >= 0; i--) {
+                        const lp = realLaps[i]
+                        if (isRelayType(lp.type)) break
+                        if (lp.runnerId === currentRunnerId) { lastLapInRelay = lp; break }
+                      }
+                      let label = 'cible'
+                      let km = { min: currentRunner.kmMin, sec: currentRunner.kmSec }
+                      // 1) Explicit liveKm (manual modal or autocalib from manual top) — wins if reasonable
+                      if (currentRunner.liveKmMin != null && currentRunner.liveKmSec != null) {
+                        const liveLapMs = kmPaceToLapMs(currentRunner.liveKmMin, currentRunner.liveKmSec)
+                        if (liveLapMs >= minLapSec * 1000 && liveLapMs <= maxLapSec * 1000) {
+                          label = 'manuel'
+                          km = { min: currentRunner.liveKmMin, sec: currentRunner.liveKmSec }
+                          lastLapInRelay = null // skip lap-based fallback below
+                        }
+                      }
+                      // 2) Lap-based fallback (auto/manuel)
+                      if (label === 'cible' && lastLapInRelay) {
+                        const isAutoLap = lastLapInRelay.type === 'checkpoint_auto' || lastLapInRelay.type === 'relay_auto'
+                        label = isAutoLap ? 'auto' : 'manuel'
+                        const k = lapMsToKmPace(lastLapInRelay.lapTime)
+                        km = { min: k.min, sec: k.sec }
+                      }
                       return (
                         <span className="hint">
-                          Tour <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{race.started ? fmtLap(currentLapMs) : '—'}</span>
-                          {' · '}Allure {p.source === 'override' ? 'man.' : p.source === 'live' ? 'live' : `estim. (E${currentRunner.energy}%)`}{' '}
-                          <span className="mono">{fmtKmPace(p.kmMin, p.kmSec)}</span>
-                          {' · '}Relai <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{currentLapIndex}</span>
-                          /<span className="mono">{plannedLaps}</span> tours
+                          Tour <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{race.started ? fmtLap(effCurrentLapMs) : '—'}</span>
+                          {' · '}Allure {label}{' '}
+                          <button
+                            className="mono"
+                            onClick={() => {
+                              if (!setRunners) return
+                              setEditPaceMin(km.min)
+                              setEditPaceSec(km.sec)
+                              setEditPaceOpen(true)
+                            }}
+                            title={setRunners ? 'Cliquer pour modifier l\'allure (manuel)' : undefined}
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              padding: 0,
+                              color: 'inherit',
+                              font: 'inherit',
+                              cursor: setRunners ? 'pointer' : 'default',
+                              textDecoration: setRunners ? 'underline dotted' : 'none',
+                            }}
+                          >
+                            {fmtKmPace(km.min, km.sec)}
+                          </button>
                         </span>
                       )
                     })()}
@@ -318,9 +449,83 @@ export function LiveScreen({
               const avgMs = relayLaps.length ? relayLaps.reduce((a, l) => a + l.lapTime, 0) / relayLaps.length : 0
               return (
                 <div className="relay-panel">
-                  <div className="relay-head">
+                  <div className="relay-head" style={{ position: 'relative' }}>
                     <span className="relay-title">🔁 Relais en cours</span>
-                    <span className="relay-count"><span className="mono">{relayLaps.length}</span> tour{relayLaps.length > 1 ? 's' : ''}</span>
+                    <span
+                      className="relay-count"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+                      onClick={() => setRelayEditOpen((v) => !v)}
+                      title="Cliquer pour modifier le nombre de tours prévus"
+                    >
+                      <span className="mono">{(relayLaps.length + currentLapProgress).toFixed(1).replace('.', ',')}</span>
+                      /<span className="mono">{plannedLaps}</span> tours
+                      <button
+                        className="btn ghost icon"
+                        style={{ padding: 2, fontSize: 11, opacity: 0.6 }}
+                        onClick={(e) => { e.stopPropagation(); setRelayEditOpen((v) => !v) }}
+                        title="Ajouter / retirer un tour"
+                      >
+                        ✎
+                      </button>
+                    </span>
+                    {relayEditOpen && (() => {
+                      // Min planned = laps already done (+1 if currently mid-lap)
+                      const minPlannedAllowed = Math.max(1, relayLaps.length + (currentLapProgress > 0 ? 1 : 0))
+                      const canDecrease = plannedLaps > minPlannedAllowed
+                      const updatePlanned = (delta: number) => {
+                        if (!setRunners || !currentRunner) return
+                        const next = plannedLaps + delta
+                        if (next < minPlannedAllowed) return
+                        setRunners((rs) => rs.map((r) => r.id === currentRunnerId ? { ...r, plannedLaps: next } : r))
+                      }
+                      return (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            right: 0,
+                            top: '100%',
+                            marginTop: 4,
+                            zIndex: 20,
+                            background: 'var(--surface)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 8,
+                            padding: 6,
+                            display: 'flex',
+                            gap: 4,
+                            alignItems: 'center',
+                            boxShadow: '0 8px 22px -8px rgba(0,0,0,0.5)',
+                          }}
+                        >
+                          <button
+                            className="btn"
+                            style={{ padding: '4px 12px', fontSize: 16, fontWeight: 700 }}
+                            onClick={() => updatePlanned(+1)}
+                            title="Augmenter le nombre de tours prévus pour ce relai"
+                          >
+                            +
+                          </button>
+                          <button
+                            className="btn"
+                            style={{ padding: '4px 12px', fontSize: 16, fontWeight: 700 }}
+                            disabled={!canDecrease}
+                            onClick={() => updatePlanned(-1)}
+                            title={canDecrease
+                              ? 'Diminuer le nombre de tours prévus'
+                              : `Impossible — déjà ${minPlannedAllowed} tour(s) entamé(s)`}
+                          >
+                            −
+                          </button>
+                          <button
+                            className="btn ghost icon"
+                            style={{ padding: 4, fontSize: 12 }}
+                            onClick={() => setRelayEditOpen(false)}
+                            title="Fermer"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )
+                    })()}
                   </div>
                   <div className="relay-stats">
                     <div className="rs">
@@ -344,15 +549,77 @@ export function LiveScreen({
                       {relayLaps.map((l, i) => {
                         const expectedMs = kmPaceToLapMs(currentRunner.kmMin, currentRunner.kmSec)
                         const abnormal = expectedMs > 0 && l.lapTime > expectedMs * 2
+                        const isAuto = l.type === 'checkpoint_auto' || l.type === 'relay_auto'
+                        // Snapshot of planned-at-start (immune to runner config edits)
+                        const planAtStart = (relayLaps[0] as any)?.plannedAtStart ?? plannedLaps
+                        // 'tour +' = manual checkpoint beyond planned (relai aurait dû être pris)
+                        const extraPassage = l.type === 'checkpoint_manual' && (i + 1) > planAtStart
                         return (
                           <div key={l._id || l.id} className={`rl ${abnormal ? 'is-abn' : ''}`}>
                             <span className="rl-n mono">T{String(i + 1).padStart(2, '0')}</span>
-                            <span className="rl-t mono">{fmtLap(l.lapTime)}</span>
+                            <span
+                              className="badge"
+                              style={{
+                                fontSize: 9,
+                                padding: '1px 5px',
+                                background: isAuto
+                                  ? 'oklch(0.72 0.18 200 / 0.18)'
+                                  : 'oklch(0.86 0.20 135 / 0.18)',
+                                color: isAuto
+                                  ? 'oklch(0.78 0.16 200)'
+                                  : 'oklch(0.92 0.20 135)',
+                              }}
+                            >
+                              {isAuto ? 'AUTO' : 'MAN.'}
+                            </span>
+                            {extraPassage && (
+                              <span
+                                className="badge mono"
+                                style={{
+                                  fontSize: 9,
+                                  padding: '1px 5px',
+                                  background: 'oklch(0.78 0.18 80 / 0.18)',
+                                  color: 'oklch(0.92 0.16 80)',
+                                }}
+                                title={`Tour supplémentaire (relai prévu au tour ${plannedLaps})`}
+                              >
+                                tour +
+                              </span>
+                            )}
+                            <button
+                              className="rl-t mono"
+                              onClick={() => {
+                                if (!onUpdateLapTime) return
+                                const totalSec = Math.round(l.lapTime / 1000)
+                                setEditMin(Math.floor(totalSec / 60))
+                                setEditSec(totalSec % 60)
+                                setEditTimeFor({ lapId: l._id || l.id, lapNumber: i + 1 })
+                              }}
+                              title="Cliquer pour corriger le temps"
+                              style={{
+                                background: 'transparent',
+                                border: 'none',
+                                cursor: onUpdateLapTime ? 'pointer' : 'default',
+                                padding: 0,
+                                color: 'inherit',
+                                font: 'inherit',
+                                textDecoration: onUpdateLapTime ? 'underline dotted' : 'none',
+                              }}
+                            >
+                              {fmtLap(l.lapTime)}
+                            </button>
                             <span className="rl-p mono">{fmtPace(l.lapTime)}</span>
                             {abnormal && <span className="rl-flag">⚠️</span>}
-                            <button className="btn ghost icon" style={{ padding: 3 }} onClick={() => deleteLap(l._id || l.id)} title="Annuler ce tour">
-                              ✕
-                            </button>
+                            {l.lapTime < minLapSec * 1000 && (
+                              <button
+                                className="btn ghost icon"
+                                style={{ padding: 3 }}
+                                onClick={() => deleteLap(l._id || l.id)}
+                                title={`Supprimer (tour < ${minLapSec}s — anomalie)`}
+                              >
+                                ✕
+                              </button>
+                            )}
                           </div>
                         )
                       })}
@@ -374,12 +641,20 @@ export function LiveScreen({
                 <>
                   <button
                     className={`big-btn top ${lapsRemainingInRelay === 0 ? 'is-relay-imminent' : ''}`}
-                    disabled={!race.started || !inCalibWindow}
+                    disabled={!canClick}
                     onClick={() => recordLap(false)}
                   >
-                    <span className="label-top">Top passage</span>
+                    <span className="label-top">Passage</span>
                     <span className="label-main mono">
-                      {!race.started ? '—' : remainingToPassage > 0 ? `dans ${fmtLap(remainingToPassage)}` : 'fin de passage'}
+                      {!race.started
+                        ? '—'
+                        : team?.autoPaused
+                          ? '⏸ PAUSE'
+                          : remainingToPassage > 0
+                            ? `Estim. ${fmtLap(remainingToPassage)}`
+                            : lapsRemainingInRelay === 0
+                              ? 'Tour supplémentaire'
+                              : "Passe maint après l'estim"}
                     </span>
                     <span className="label-sub">
                       {!race.started
@@ -391,12 +666,12 @@ export function LiveScreen({
                   </button>
                   <button
                     className={`big-btn relay ${lapsRemainingInRelay > 0 && race.started ? 'is-warn' : ''}`}
-                    disabled={!race.started || !inCalibWindow}
+                    disabled={!canClick}
                     onClick={() => recordLap(true)}
                   >
                     <span className="label-top">Relai → {nextRunner?.name || '—'}</span>
                     <span className="label-main mono">
-                      {!race.started ? '—' : etaRelay > 0 ? `dans ${fmtLap(etaRelay)}` : 'maintenant'}
+                      {!race.started ? '—' : team?.autoPaused ? '⏸ PAUSE' : etaRelay > 0 ? `Estim. ${fmtLap(etaRelay)}` : 'maintenant'}
                     </span>
                     <span className="label-sub">
                       {!race.started
@@ -413,12 +688,93 @@ export function LiveScreen({
             </div>
 
             <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-              <button className="btn ghost" onClick={undoLap} disabled={!race.laps.length}>
-                ↩ Annuler dernier
-              </button>
-              <button className="btn ghost" onClick={() => setPickerOpen('reorder')} disabled={!setOrder}>
-                📋 Modifier l'ordre
-              </button>
+              {(() => {
+                const lastLap = race.laps[race.laps.length - 1]
+                const fixLapMs = currentRunner ? kmPaceToLapMs(currentRunner.kmMin, currentRunner.kmSec) : 0
+                const sinceLastMs = lastLap ? now - lastLap.timestamp : Infinity
+                const canUndo = !!lastLap && fixLapMs > 0 && sinceLastMs < fixLapMs * 0.5
+                return (
+                  <button
+                    className="btn ghost"
+                    disabled={!canUndo}
+                    title={canUndo
+                      ? `Dernier enregistrement il y a ${fmtLap(sinceLastMs)} (< 50% du temps fix)`
+                      : 'Annulation impossible — délai depuis dernier tour > 50% du temps fix du coureur'}
+                    onClick={() => {
+                      if (!canUndo) return
+                      if (!window.confirm(`Annuler le dernier tour enregistré ?\n\n(il y a ${fmtLap(sinceLastMs)})`)) return
+                      undoLap()
+                    }}
+                  >
+                    ↩ Annuler dernier
+                  </button>
+                )
+              })()}
+              {onSetAutoPaused && !team?.autoPaused && (
+                <button
+                  className="btn ghost"
+                  onClick={() => {
+                    if (!window.confirm("Marquer l'équipe en retard inconnu ?\n\nLa cron auto sera mise en pause et les boutons Passage / Relai débloqués pour saisie manuelle.")) return
+                    onSetAutoPaused(true)
+                    setForceUnlock(true)
+                    setSlideVal(100)
+                  }}
+                  title="Stopper l'auto-validation — Passage ou Relai manuel la relancera"
+                >
+                  ⏸ Retard inconnu
+                </button>
+              )}
+              {team?.autoPaused && (
+                <span
+                  className="badge"
+                  style={{
+                    fontSize: 12,
+                    padding: '6px 12px',
+                    borderRadius: 999,
+                    background: 'oklch(0.78 0.18 80 / 0.18)',
+                    color: 'oklch(0.92 0.16 80)',
+                    border: '1px solid oklch(0.78 0.18 80 / 0.5)',
+                  }}
+                >
+                  ⏸ Retard inconnu — Top/Relai pour reprendre
+                </span>
+              )}
+              {/* Slide-to-unlock — force-enables Top/Relai when locked (hidden during auto pause: already unlocked) */}
+              {!inWindow && race.started && !team?.autoPaused && (
+                <div
+                  className={`unlock-slider ${forceUnlock ? 'is-active' : ''}`}
+                  style={{ ['--slide' as any]: (forceUnlock ? 100 : slideVal) + '%' }}
+                >
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={forceUnlock ? 100 : slideVal}
+                    onChange={(e) => setSlideVal(+e.target.value)}
+                    onPointerUp={() => {
+                      if (slideVal >= 95) setForceUnlock(true)
+                      else setSlideVal(0)
+                    }}
+                    onTouchEnd={() => {
+                      if (slideVal >= 95) setForceUnlock(true)
+                      else setSlideVal(0)
+                    }}
+                    aria-label="Glisser pour débloquer Top/Relai"
+                  />
+                  <span className="unlock-label">
+                    {forceUnlock ? '🔓 Débloqué' : '→ Glisser pour débloquer'}
+                  </span>
+                </div>
+              )}
+              {forceUnlock && inWindow && (
+                <button
+                  className="btn ghost"
+                  onClick={() => { setForceUnlock(false); setSlideVal(0) }}
+                  title="Reverrouiller"
+                >
+                  🔒 Reverrouiller
+                </button>
+              )}
               <button className="btn ghost" style={{ marginLeft: 'auto' }} onClick={onBack}>
                 ← Planning
               </button>
@@ -438,12 +794,13 @@ export function LiveScreen({
               <div className="live-map">
                 <GpxMap
                   showLabel={false}
-                  progress={(() => {
-                    if (!race.started || !currentRunner) return undefined
-                    const p = getRunnerPace(currentRunner, race)
-                    const expected = kmPaceToLapMs(p.kmMin, p.kmSec)
-                    return expected > 0 ? currentLapMs / expected : undefined
-                  })()}
+                  progress={
+                    race.started && expectedLapMs > 0
+                      ? team?.autoPaused
+                        ? 0.92 // freeze marker just before finish line while paused
+                        : (effCurrentLapMs / expectedLapMs) % 1
+                      : undefined
+                  }
                 />
               </div>
               <div className="stat-row" style={{ marginTop: 12 }}>
@@ -639,6 +996,135 @@ export function LiveScreen({
           onClose={() => setPickerOpen(null)}
         />
       )}
+
+      {editPaceOpen && setRunners && currentRunner && (() => {
+        const lapMs = kmPaceToLapMs(editPaceMin, editPaceSec)
+        const minMs = minLapSec * 1000
+        const maxMs = maxLapSec * 1000
+        const tooFast = lapMs > 0 && lapMs < minMs
+        const tooSlow = lapMs > maxMs
+        const valid = lapMs >= minMs && lapMs <= maxMs
+        return (
+          <Modal
+            title={`Allure manuelle · ${currentRunner.name}`}
+            icon="⚡"
+            onClose={() => setEditPaceOpen(false)}
+            footer={
+              <>
+                <button className="btn ghost" onClick={() => setEditPaceOpen(false)}>Annuler</button>
+                <button
+                  className="btn primary"
+                  disabled={!valid}
+                  onClick={() => {
+                    setRunners((rs) => rs.map((r) => r.id === currentRunnerId ? { ...r, liveKmMin: editPaceMin, liveKmSec: editPaceSec } : r))
+                    setEditPaceOpen(false)
+                    pushToast && pushToast(`Allure manuelle ${editPaceMin}:${String(editPaceSec).padStart(2, '0')}/km`, 'Flag')
+                  }}
+                >
+                  ✓ Appliquer
+                </button>
+              </>
+            }
+          >
+            <div className="hint" style={{ marginBottom: 12 }}>
+              Saisissez l'allure manuelle au km. Elle sera utilisée comme override jusqu'au prochain relai (qui réinitialise sur la cible du nouveau coureur).
+            </div>
+            <div className="field">
+              <span className="field-label">Allure /km (min : sec)</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  type="number"
+                  min="0"
+                  max="20"
+                  className="mono"
+                  value={editPaceMin}
+                  onChange={(e) => setEditPaceMin(Math.max(0, +e.target.value || 0))}
+                  style={{ width: 80, textAlign: 'center', fontSize: 18 }}
+                />
+                <span style={{ fontSize: 20, color: 'var(--muted)' }}>:</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="59"
+                  className="mono"
+                  value={editPaceSec}
+                  onChange={(e) => setEditPaceSec(Math.min(59, Math.max(0, +e.target.value || 0)))}
+                  style={{ width: 80, textAlign: 'center', fontSize: 18 }}
+                />
+                <span style={{ marginLeft: 8, color: 'var(--muted)', fontSize: 13 }}>min : sec /km</span>
+              </div>
+            </div>
+            <div className="hint mono" style={{ marginTop: 8 }}>
+              Tour estimé : <strong>{fmtLap(lapMs)}</strong>{' '}
+              (bornes admin : tour {fmtLap(minMs)} → {fmtLap(maxMs)})
+            </div>
+            {tooFast && (
+              <div className="hint" style={{ color: 'oklch(0.85 0.16 25)', marginTop: 4 }}>
+                ⚠️ Trop rapide — minimum tour {fmtLap(minMs)}.
+              </div>
+            )}
+            {tooSlow && (
+              <div className="hint" style={{ color: 'oklch(0.85 0.16 25)', marginTop: 4 }}>
+                ⚠️ Trop lent — maximum tour {fmtLap(maxMs)}.
+              </div>
+            )}
+          </Modal>
+        )
+      })()}
+
+      {editTimeFor && onUpdateLapTime && (
+        <Modal
+          title={`Corriger le temps · T${String(editTimeFor.lapNumber).padStart(2, '0')}`}
+          icon="⏱️"
+          onClose={() => setEditTimeFor(null)}
+          footer={
+            <>
+              <button className="btn ghost" onClick={() => setEditTimeFor(null)}>Annuler</button>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  const ms = (editMin * 60 + editSec) * 1000
+                  if (ms <= 0) return
+                  onUpdateLapTime(editTimeFor.lapId, ms)
+                  setEditTimeFor(null)
+                }}
+                disabled={editMin === 0 && editSec === 0}
+              >
+                ✓ Enregistrer
+              </button>
+            </>
+          }
+        >
+          <div className="hint" style={{ marginBottom: 12 }}>
+            Saisissez le nouveau temps de tour (minutes : secondes).
+          </div>
+          <div className="field">
+            <span className="field-label">Temps du tour</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="number"
+                min="0"
+                max="59"
+                className="mono"
+                value={editMin}
+                onChange={(e) => setEditMin(Math.max(0, +e.target.value || 0))}
+                style={{ width: 80, textAlign: 'center', fontSize: 18 }}
+              />
+              <span style={{ fontSize: 20, color: 'var(--muted)' }}>:</span>
+              <input
+                type="number"
+                min="0"
+                max="59"
+                className="mono"
+                value={editSec}
+                onChange={(e) => setEditSec(Math.min(59, Math.max(0, +e.target.value || 0)))}
+                style={{ width: 80, textAlign: 'center', fontSize: 18 }}
+              />
+              <span style={{ marginLeft: 8, color: 'var(--muted)', fontSize: 13 }}>min : sec</span>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -751,14 +1237,17 @@ function ManageRunnersModal({
   for (const l of race.laps.filter((l) => l.type !== 'position')) {
     lapsByRunner[l.runnerId] = (lapsByRunner[l.runnerId] || 0) + 1
   }
+  // Limit modal to current runner in piste only — opened from "Gérer" button in runner band
+  const onlyIds = order.length > 0 ? [order[currentIdx % order.length]] : []
   return (
-    <Modal title="Gérer les coureurs" icon="⚙️" onClose={onClose}
+    <Modal title="Gérer le coureur en piste" icon="⚙️" onClose={onClose}
       footer={<button className="btn primary" onClick={onClose}>Terminé</button>}>
       <div className="hint" style={{ marginBottom: 12 }}>
-        Mettez à jour énergie, statut, et allure live en cours de course. L'allure auto = temps du dernier tour du coureur.
+        Mettez à jour énergie, statut, et allure live du coureur actuellement en piste.
       </div>
       <div className="grid" style={{ gap: 10 }}>
-        {order.map((id, idx) => {
+        {onlyIds.map((id) => {
+          const idx = order.indexOf(id)
           const r = runners.find((x) => x.id === id)
           if (!r) return null
           const p = getRunnerPace(r, race)
@@ -784,10 +1273,6 @@ function ManageRunnersModal({
                   <div>
                     <div className="field-label" style={{ marginBottom: 4 }}>Énergie</div>
                     <EnergySegment value={r.energy} onChange={(v) => update(id, { energy: v })} />
-                  </div>
-                  <div>
-                    <div className="field-label" style={{ marginBottom: 4 }}>Statut</div>
-                    <StatusSegment value={r.status} onChange={(v) => update(id, { status: v })} />
                   </div>
                 </div>
                 <div className="pace-stack" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>

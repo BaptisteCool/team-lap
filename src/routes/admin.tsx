@@ -39,6 +39,8 @@ function AdminPage() {
   const setScheduleMutation = useMutation('events:setSchedule' as any)
   const updateContactMutation = useMutation('events:updateContact' as any)
   const updatePasswordMutation = useMutation('events:updateAdminPassword' as any)
+  const updateReplaceAutoWindowMutation = useMutation('events:updateReplaceAutoWindow' as any)
+  const updateLapBoundsMutation = useMutation('events:updateLapBounds' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
   const endItrMutation = useMutation('events:endInterruption' as any)
   const updateItrMutation = useMutation('events:updateInterruption' as any)
@@ -59,6 +61,9 @@ function AdminPage() {
       },
       contact: { email: event.contact?.email || '', phone: event.contact?.phone || '' },
       password: event.adminPassword || a.password,
+      replaceAutoWindowSec: event.replaceAutoWindowSec ?? 180,
+      minLapSec: event.minLapSec ?? 165,
+      maxLapSec: event.maxLapSec ?? 480,
     }))
   }, [event])
 
@@ -99,6 +104,18 @@ function AdminPage() {
       // Password
       if (prev.password !== next.password) {
         updatePasswordMutation({ eventId: event._id, password: next.password }).catch(console.error)
+      }
+      // Replace auto window (manual click acceptance)
+      if (prev.replaceAutoWindowSec !== next.replaceAutoWindowSec && next.replaceAutoWindowSec != null) {
+        updateReplaceAutoWindowMutation({ eventId: event._id, seconds: next.replaceAutoWindowSec }).catch(console.error)
+      }
+      // Lap time bounds (min / max per lap, in seconds)
+      if (prev.minLapSec !== next.minLapSec || prev.maxLapSec !== next.maxLapSec) {
+        updateLapBoundsMutation({
+          eventId: event._id,
+          minLapSec: next.minLapSec,
+          maxLapSec: next.maxLapSec,
+        }).catch(console.error)
       }
       // Interruptions: detect adds/edits/deletes
       const prevItr: any[] = prev.interruptions || []

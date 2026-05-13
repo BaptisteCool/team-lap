@@ -520,6 +520,94 @@ export function AdminScreen({
             </div>
           </div>
 
+          {/* Replace auto window — acceptance time for manual click overriding auto lap */}
+          <div className="card">
+            <div className="card-head">
+              <span>⏱️</span>
+              <h3>Fenêtre d'acceptation manuelle</h3>
+            </div>
+            <div className="card-body grid" style={{ gap: 10 }}>
+              <div className="hint">
+                Délai (en secondes) pendant lequel un click sur Passage / Relai côté équipe REMPLACE l'éventuel passage auto enregistré juste avant.
+                <br />Recommandé : <strong className="mono">10s</strong> en test, <strong className="mono">180s</strong> en course.
+              </div>
+              <div className="field" style={{ maxWidth: 220 }}>
+                <span className="field-label">Délai (secondes)</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="600"
+                  className="mono"
+                  value={(admin as any).replaceAutoWindowSec ?? 180}
+                  onChange={e => setAdmin((a: any) => ({ ...a, replaceAutoWindowSec: Math.max(0, +e.target.value || 0) }))}
+                  style={{ textAlign: 'center' }}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn"
+                  onClick={() => setAdmin((a: any) => ({ ...a, replaceAutoWindowSec: 10 }))}
+                  title="Préréglage tests"
+                >
+                  10s · tests
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => setAdmin((a: any) => ({ ...a, replaceAutoWindowSec: 180 }))}
+                  title="Préréglage course"
+                >
+                  180s · course
+                </button>
+              </div>
+              <hr className="sep" style={{ margin: '4px 0' }} />
+              <div className="hint">
+                Bornes physiques temps au tour (sec). Permet d'autoriser des tours plus courts en local pour tests.
+              </div>
+              <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="field">
+                  <span className="field-label">Min temps tour (sec)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="600"
+                    className="mono"
+                    value={(admin as any).minLapSec ?? 165}
+                    onChange={e => setAdmin((a: any) => ({ ...a, minLapSec: Math.max(1, +e.target.value || 1) }))}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+                <div className="field">
+                  <span className="field-label">Max temps tour (sec)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="3600"
+                    className="mono"
+                    value={(admin as any).maxLapSec ?? 480}
+                    onChange={e => setAdmin((a: any) => ({ ...a, maxLapSec: Math.max(1, +e.target.value || 1) }))}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn"
+                  onClick={() => setAdmin((a: any) => ({ ...a, minLapSec: 5, maxLapSec: 600 }))}
+                  title="Préréglage tests permissifs"
+                >
+                  5..600s · tests
+                </button>
+                <button
+                  className="btn"
+                  onClick={() => setAdmin((a: any) => ({ ...a, minLapSec: 165, maxLapSec: 480 }))}
+                  title="Préréglage course"
+                >
+                  165..480s · course
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* Contact */}
           <div className="card">
             <div className="card-head">

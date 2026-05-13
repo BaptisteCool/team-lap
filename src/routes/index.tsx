@@ -18,15 +18,27 @@ export const Route = createFileRoute('/')({
       event?._id ? { eventId: event._id } : 'skip',
     ) as any[] | null | undefined
 
+    const teamUnlockKey = (teamId: string, pin: string) => `teamlap.team.${teamId}.pin.${pin}`
+
     const handlePickTeam = (teamId: string) => {
       const team = teams?.find(t => t._id === teamId)
-      if (team) {
-        setSelectedTeamId(teamId)
-      }
+      if (!team) return
+      // Skip PinGate if PIN already entered (and unchanged) on this browser
+      try {
+        if (localStorage.getItem(teamUnlockKey(teamId, team.pin)) === '1') {
+          navigate({ to: '/team/$teamId', params: { teamId }, search: { tab: 'live', readonly: false } })
+          return
+        }
+      } catch (_) {}
+      setSelectedTeamId(teamId)
     }
 
     const handleUnlock = () => {
       if (selectedTeamId) {
+        const team = teams?.find((t: any) => t._id === selectedTeamId)
+        if (team) {
+          try { localStorage.setItem(teamUnlockKey(selectedTeamId, team.pin), '1') } catch (_) {}
+        }
         navigate({ to: '/team/$teamId', params: { teamId: selectedTeamId }, search: { tab: 'live', readonly: false } })
       }
     }

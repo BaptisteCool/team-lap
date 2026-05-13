@@ -41,6 +41,13 @@ export default defineSchema({
       email: v.optional(v.string()),
       phone: v.optional(v.string()),
     })),
+
+    // Manual click acceptance window (seconds): manual top/relai click within X sec of an auto lap REPLACES it
+    replaceAutoWindowSec: v.optional(v.number()),
+
+    // Physical lap time bounds (seconds) — used by form validation. Defaults: 165 (2:45) and 480 (8:00).
+    minLapSec: v.optional(v.number()),
+    maxLapSec: v.optional(v.number()),
     
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -74,6 +81,7 @@ export default defineSchema({
     // Team configuration
     maxRunners: v.number(),
     ready: v.boolean(), // marked as ready for race start
+    autoPaused: v.optional(v.boolean()), // when true, cron skips auto laps for this team until next manual action
     
     // Profile image (optional)
     profileImage: v.optional(v.string()), // URL to team profile image
@@ -116,6 +124,7 @@ export default defineSchema({
     // Display & race state
     color: v.optional(v.string()),
     status: v.optional(v.string()), // 'ready' | 'uncertain' | 'out'
+    gender: v.optional(v.string()), // 'Homme' | 'Femme' | 'Autre'
 
     createdAt: v.number(),
   })
@@ -149,6 +158,29 @@ export default defineSchema({
     
     // Auto-relay flag (uniquement pour les types auto)
     autoRelay: v.optional(v.boolean()),
+
+    // Manual override: marks this manual checkpoint as an "extra lap" (tour +) regardless of position-in-relay
+    forcedExtra: v.optional(v.boolean()),
+
+    // Bulk relay flag — values are user-declared approximations (watch precision)
+    approximate: v.optional(v.boolean()),
+
+    // Snapshot to support clean undo: team.currentIdx BEFORE this lap was inserted
+    prevCurrentIdx: v.optional(v.number()),
+
+    // Snapshot of runner.plannedLaps at insert time — used to detect tour +/- vs the planned count at relay start
+    plannedAtStart: v.optional(v.number()),
+
+    // If this lap REPLACED a previous (auto) lap, store enough to re-insert it on undo
+    replaces: v.optional(v.object({
+      runnerId: v.string(),
+      timestamp: v.number(),
+      lapTime: v.number(),
+      type: v.string(),
+      lapNumber: v.number(),
+      autoRelay: v.optional(v.boolean()),
+      prevCurrentIdx: v.optional(v.number()),
+    })),
   })
     .index('by_team', ['teamId'])
     .index('by_team_runner', ['teamId', 'runnerId'])

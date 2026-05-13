@@ -25,6 +25,7 @@ interface TeamFull {
   maxRunners: number
   goalLaps: number
   ready: boolean
+  autoPaused?: boolean
   profileImage?: string
   currentIdx?: number
   runners: Runner[]
@@ -83,80 +84,46 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
     }
   }
 
-  // Build planned schedule for a team: ordered list of laps where each entry = {runnerId, durationMs}
-  // Uses ESTIMATED pace only (kmMin/kmSec) — ignores live & override → marker stays stable.
-  function buildSchedule(t: TeamFull): Array<{ runnerId: string; runnerName: string; runnerColor?: string; durationMs: number }> {
-    const orderArr: string[] =
-      Array.isArray(t.order) && t.order.length > 0
-        ? t.order
-        : (t.runners || []).map((r) => r.id)
-    if (orderArr.length === 0 || !t.runners?.length) return []
-    const sched: Array<{ runnerId: string; runnerName: string; runnerColor?: string; durationMs: number }> = []
-    for (const id of orderArr) {
-      const r = t.runners.find((x) => x.id === id)
-      if (!r || r.status === 'out') continue
-      const planned = Math.max(1, r.plannedLaps || 1)
-      const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
-      if (lapMs <= 0) continue
-      for (let k = 0; k < planned; k++) {
-        sched.push({ runnerId: r.id, runnerName: r.name, runnerColor: r.color, durationMs: lapMs })
-      }
-    }
-    return sched
-  }
 
-  // Project marker / lap count / current runner from race elapsed against planned schedule.
-  function projectFromSchedule(t: TeamFull, elapsed: number) {
-    const sched = buildSchedule(t)
-    if (sched.length === 0) {
-      return { lapCount: 0, currentRunner: null as Runner | null, runnerLapsCount: 0, progress: 0, expectedLapMs: kmPaceToLapMs(6, 0) }
-    }
-    const cycleMs = sched.reduce((a, s) => a + s.durationMs, 0)
-    if (cycleMs <= 0) {
-      return { lapCount: 0, currentRunner: null as Runner | null, runnerLapsCount: 0, progress: 0, expectedLapMs: kmPaceToLapMs(6, 0) }
-    }
-    const cyclesDone = Math.floor(elapsed / cycleMs)
-    const intoCycleMs = elapsed - cyclesDone * cycleMs
-    let acc = 0
-    let lapInCycle = 0
-    let currentSched = sched[0]
-    for (let i = 0; i < sched.length; i++) {
-      const s = sched[i]
-      if (intoCycleMs < acc + s.durationMs) {
-        lapInCycle = i
-        currentSched = s
-        break
-      }
-      acc += s.durationMs
-    }
-    const lapCount = cyclesDone * sched.length + lapInCycle
-    const intoLapMs = intoCycleMs - acc
-    const progress = currentSched.durationMs > 0 ? intoLapMs / currentSched.durationMs : 0
-    const currentRunner = (t.runners || []).find((r) => r.id === currentSched.runnerId) || null
-    // Count laps the current runner has done in the projected schedule so far
-    let runnerLapsCount = 0
-    for (let c = 0; c < cyclesDone; c++) {
-      runnerLapsCount += sched.filter((s) => s.runnerId === currentSched.runnerId).length
-    }
-    for (let i = 0; i < lapInCycle; i++) {
-      if (sched[i].runnerId === currentSched.runnerId) runnerLapsCount++
-    }
-    return { lapCount, currentRunner, runnerLapsCount, progress, expectedLapMs: currentSched.durationMs }
-  }
-
-  function projectTeam(t: TeamFull) {
-    const elapsed = raceStarted && raceStartTime ? Math.max(0, now - raceStartTime) : 0
-    return projectFromSchedule(t, elapsed)
+  // Resolve current runner from DB currentIdx (matches server state — advances on manual relay)
+  function getDbCurrentRunner(t: TeamFull): Runner | null {
+    if (!t.runners?.length) return null
+    const orderArr: string[] = (t.order && t.order.length > 0)
+      ? t.order
+      : t.runners.map((r) => r.id)
+    if (orderArr.length === 0) return null
+    const id = orderArr[(t.currentIdx || 0) % orderArr.length]
+    return t.runners.find((r) => r.id === id) || t.runners[0]
   }
 
   const markers = (teams || [])
     .filter(t => t.ready)
     .map(t => {
-      const proj = projectTeam(t)
+      const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position').slice().sort((a, b) => a.timestamp - b.timestamp)
+      const lastLapAt = tLaps.length ? tLaps[tLaps.length - 1].timestamp : raceStartTime
+      const dbCurrent = getDbCurrentRunner(t)
+      // Marker: prefer live pace if its lap is within admin-configured bounds.
+      const minLapMsHome = (event?.minLapSec ?? 165) * 1000
+      const maxLapMsHome = (event?.maxLapSec ?? 480) * 1000
+      const expectedLapMs = (() => {
+        if (!dbCurrent) return kmPaceToLapMs(6, 0)
+        if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
+          const liveLapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec)
+          if (liveLapMs >= minLapMsHome && liveLapMs <= maxLapMsHome) return liveLapMs
+        }
+        return kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
+      })()
+      let progress = 0
+      if (raceStarted && lastLapAt && expectedLapMs > 0) {
+        progress = ((now - lastLapAt) / expectedLapMs) % 1
+        if (progress < 0) progress = 0
+      }
+      // Freeze marker just before line when team's cron is paused (runner stopped)
+      if (t.autoPaused) progress = 0.92
       return {
         id: t._id,
         color: t.color || TEAM_COLOR_PALETTE[0],
-        progress: raceStarted ? proj.progress : 0,
+        progress,
         label: t.name || '',
       }
     })
@@ -206,11 +173,21 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
             {teams && teams.length > 0 && (
               <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                 {teams.map(t => {
-                  const proj = projectTeam(t)
-                  const current = proj.currentRunner
-                  const teamTotalLaps = raceStarted ? proj.lapCount : 0
-                  const runnerLaps = raceStarted ? proj.runnerLapsCount : 0
-                  const pace = current ? fmtKmPace(current.kmMin, current.kmSec) : '—'
+                  const current = getDbCurrentRunner(t)
+                  const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position')
+                  const teamTotalLaps = tLaps.length
+                  const runnerLaps = current ? tLaps.filter((l) => l.runnerId === current.id).length : 0
+                  const pace = current
+                    ? (() => {
+                        if (current.liveKmMin != null && current.liveKmSec != null) {
+                          const lapMs = kmPaceToLapMs(current.liveKmMin, current.liveKmSec)
+                          const minMs = (event?.minLapSec ?? 165) * 1000
+                          const maxMs = (event?.maxLapSec ?? 480) * 1000
+                          if (lapMs >= minMs && lapMs <= maxMs) return fmtKmPace(current.liveKmMin, current.liveKmSec)
+                        }
+                        return fmtKmPace(current.kmMin, current.kmSec)
+                      })()
+                    : '—'
                   return (
                     <button
                       key={t._id}
