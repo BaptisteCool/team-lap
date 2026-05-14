@@ -717,6 +717,21 @@ export function PlanningScreen({
                               relais
                             </span>
                           )}
+                          {r.status === 'uncertain' && (
+                            <span
+                              className="badge"
+                              style={{
+                                fontSize: 10,
+                                flexShrink: 0,
+                                background: 'oklch(0.82 0.17 70 / 0.18)',
+                                color: 'oklch(0.82 0.17 70)',
+                                border: '1px solid oklch(0.82 0.17 70 / 0.5)',
+                              }}
+                              title="Coureur incertain"
+                            >
+                              ? Incertain
+                            </span>
+                          )}
                         </span>
                         <span className="mono" style={{ color: 'var(--text-2)', fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                           {fmtKmPace(r.kmMin, r.kmSec)}
