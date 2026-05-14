@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { kmPaceToLapMs } from '../lib/race-data'
+import { kmPaceToLapMs, lapMsToKmPace } from '../lib/race-data'
 import { EnergyBar } from './EnergyBar'
 import { StatusChip } from './StatusChip'
 
@@ -733,8 +733,20 @@ export function PlanningScreen({
                             </span>
                           )}
                         </span>
-                        <span className="mono" style={{ color: 'var(--text-2)', fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
-                          {fmtKmPace(r.kmMin, r.kmSec)}
+                        <span
+                          className="mono"
+                          style={{ color: 'var(--text-2)', fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}
+                          title={r.id === currentRunnerId && currentRunnerExpectedLapMs && currentRunnerExpectedLapMs > 0 ? 'Allure effective (live ou manuelle)' : 'Allure cible'}
+                        >
+                          {(() => {
+                            // Current runner: derive pace from his EFFECTIVE lap time (live/manual override),
+                            // consistent with the ETA above. Fallback to target if expectedLapMs missing/zero.
+                            if (r.id === currentRunnerId && currentRunnerExpectedLapMs && currentRunnerExpectedLapMs > 0) {
+                              const p = lapMsToKmPace(currentRunnerExpectedLapMs)
+                              if (p && (p.min > 0 || p.sec > 0)) return fmtKmPace(p.min, p.sec)
+                            }
+                            return fmtKmPace(r.kmMin, r.kmSec)
+                          })()}
                         </span>
                         <span
                           className="mono"
