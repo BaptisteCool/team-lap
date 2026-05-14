@@ -54,7 +54,7 @@ export const recordLap = mutation({
       .query('laps')
       .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
       .collect()
-    const sortedDesc = allTeamLaps.sort((a, b) => b.timestamp - a.timestamp)
+    const sortedDesc = allTeamLaps.sort((a: any, b: any) => b.timestamp - a.timestamp)
     const lastLap = sortedDesc[0] || null
     const minLapMs = ((event?.minLapSec ?? 165) as number) * 1000
     const isAutoLast = lastLap && (lastLap.type === 'checkpoint_auto' || lastLap.type === 'relay_auto')
@@ -278,7 +278,7 @@ async function decideAutoLap(
     .query('laps')
     .withIndex('by_team', (q: any) => q.eq('teamId', team._id))
     .collect()
-  const sortedDesc = allTeamLaps.sort((a, b) => b.timestamp - a.timestamp)
+  const sortedDesc = allTeamLaps.sort((a: any, b: any) => b.timestamp - a.timestamp)
   let lapsThisStint = 0
   for (const l of sortedDesc) {
     if (l.type === 'relay_manual' || l.type === 'relay_auto') break
@@ -323,7 +323,7 @@ async function applyLap(
     .query('laps')
     .withIndex('by_team', (q: any) => q.eq('teamId', teamId))
     .collect()
-  const sortedDesc = allTeamLaps.sort((a, b) => b.timestamp - a.timestamp)
+  const sortedDesc = allTeamLaps.sort((a: any, b: any) => b.timestamp - a.timestamp)
   const lastLap = sortedDesc[0] || null
   const now = Date.now()
   if (!opts.bypassDebounce && lastLap && now - lastLap.timestamp < MIN_LAP_GAP_MS) return null
@@ -426,7 +426,7 @@ export const updateLap = mutation({
         .collect()
       const sorted = allLaps.filter((l) => l._id !== args.lapId).sort((a, b) => a.timestamp - b.timestamp)
       const prev = sorted.filter((l) => l.timestamp < args.timestamp!).pop()
-      const event = await ctx.db.get(lap.teamId).then((t: any) => (t ? ctx.db.get(t.eventId) : null))
+      const event: any = await ctx.db.get(lap.teamId).then((t: any) => (t ? ctx.db.get(t.eventId) : null))
       const refTs = prev ? prev.timestamp : (event?.actualStart || args.timestamp)
       patch.lapTime = Math.max(0, args.timestamp! - refTs)
     }

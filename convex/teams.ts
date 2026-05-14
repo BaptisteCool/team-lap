@@ -1,7 +1,7 @@
 import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 
-const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
+export const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
 
 // Helper (used internally): resolve max runners via the event parent.
 async function resolveMaxRunners(ctx: any, teamId: any): Promise<number> {
@@ -303,7 +303,6 @@ export const createTeam = mutation({
 })
 
 // Helper: resolve max runners for a team via its parent event. Fallback DEFAULT_MAX_RUNNERS_PER_TEAM (10).
-export const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
 export const getMaxRunnersForTeam = query({
   args: { teamId: v.id('teams') },
   handler: async (ctx, args) => {
