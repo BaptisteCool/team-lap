@@ -382,6 +382,37 @@ function TeamPage() {
             schedule={schedule}
             onContinue={() => setActiveTab('live')}
             onBack={() => setActiveTab('setup')}
+            raceStartTime={event?.actualStart || null}
+            currentIdx={teamData?.currentIdx || 0}
+            currentRunnerLapsDone={(() => {
+              const cId = order[(teamData?.currentIdx || 0) % Math.max(1, order.length)]
+              if (!cId) return 0
+              const all = (lapsData || []).filter((l: any) => l.type !== 'position').slice().sort((a: any, b: any) => a.timestamp - b.timestamp)
+              let count = 0
+              for (let i = all.length - 1; i >= 0; i--) {
+                const l = all[i]
+                if (l.type === 'relay_manual' || l.type === 'relay_auto') break
+                if (l.runnerId === cId) count++
+              }
+              return count
+            })()}
+            currentRunnerExpectedLapMs={(() => {
+              const minLap = ((event as any)?.minLapSec ?? 165) * 1000
+              const maxLap = ((event as any)?.maxLapSec ?? 480) * 1000
+              const cR = (runners as any[]).find((r) => r.id === order[(teamData?.currentIdx || 0) % Math.max(1, order.length)])
+              if (!cR) return 0
+              if (cR.liveKmMin != null && cR.liveKmSec != null) {
+                const liveMs = (cR.liveKmMin * 60 + cR.liveKmSec) * 900 // = secPerKm * 0.9 sec
+                const liveLapMs = Math.round(liveMs)
+                if (liveLapMs >= minLap && liveLapMs <= maxLap) return liveLapMs
+              }
+              return (cR.kmMin * 60 + cR.kmSec) * 900
+            })()}
+            currentLapStartedAt={(() => {
+              if (!event?.actualStart) return null
+              const all = (lapsData || []).filter((l: any) => l.type !== 'position').slice().sort((a: any, b: any) => a.timestamp - b.timestamp)
+              return all.length ? all[all.length - 1].timestamp : event.actualStart
+            })()}
             groupModeQueue={(team as any).groupModeQueue}
             onSetRunnerGroup={(rid, group) => {
               if (readonly || !teamData?._id) return

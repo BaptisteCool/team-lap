@@ -82,6 +82,7 @@ export default defineSchema({
     maxRunners: v.number(),
     ready: v.boolean(), // marked as ready for race start
     autoPaused: v.optional(v.boolean()), // when true, cron skips auto laps for this team until next manual action
+    cronCooldownUntil: v.optional(v.number()), // timestamp until which cron autoTick must skip this team (set after manual record)
     
     // Profile image (optional)
     profileImage: v.optional(v.string()), // URL to team profile image

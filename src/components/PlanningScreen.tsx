@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { kmPaceToLapMs } from '../lib/race-data'
 import { EnergyBar } from './EnergyBar'
 import { StatusChip } from './StatusChip'
@@ -34,6 +34,11 @@ interface PlanningScreenProps {
   schedule: Schedule
   onContinue: () => void
   onBack: () => void
+  raceStartTime?: number | null
+  currentIdx?: number
+  currentRunnerLapsDone?: number
+  currentRunnerExpectedLapMs?: number
+  currentLapStartedAt?: number | null
   groupModeQueue?: GroupModeEntry[]
   onSetRunnerGroup?: (runnerLocalId: string, group: string | undefined) => void
   onEnqueueGroupMode?: (groupName: string, remainingRelays: number) => void
@@ -49,6 +54,11 @@ export function PlanningScreen({
   schedule,
   onContinue,
   onBack,
+  raceStartTime,
+  currentIdx,
+  currentRunnerLapsDone,
+  currentRunnerExpectedLapMs,
+  currentLapStartedAt,
   groupModeQueue,
   onSetRunnerGroup,
   onEnqueueGroupMode,
@@ -60,6 +70,12 @@ export function PlanningScreen({
   const [editRunnerId, setEditRunnerId] = useState<string | null>(null)
   const [groupModeFor, setGroupModeFor] = useState<string | null>(null)
   const [groupModeNb, setGroupModeNb] = useState(2)
+  // Tick to refresh ETAs in real time (current runner's elapsed lap + group queue countdowns)
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
 
   function getRunner(id: string) {
     return runners.find(r => r.id === id)
@@ -118,16 +134,78 @@ export function PlanningScreen({
 
   const activeOrder = order.filter(id => getRunner(id)?.status !== 'out')
 
-  // Sequence des passages : chaque coureur × plannedLaps consécutifs, puis suivant
-  const expandedSequence: Array<{ id: string; runner: Runner; slotIdx: number; slotTotal: number; isRelay: boolean }> = []
-  activeOrder.forEach(id => {
-    const r = getRunner(id)
-    if (!r) return
+  // Active group-mode entry — affects upcoming passes preview
+  const activeGroupEntry = (groupModeQueue && groupModeQueue.length > 0) ? groupModeQueue[0] : null
+  const groupActiveName = activeGroupEntry?.status === 'active' ? activeGroupEntry.groupName : null
+
+  // Real-time current runner (from LiveScreen state)
+  const currentRunnerId = (currentIdx != null && order.length > 0) ? order[currentIdx % order.length] : null
+  const currentRunner = currentRunnerId ? getRunner(currentRunnerId) : null
+  const lapsDoneCurrent = currentRunnerLapsDone ?? 0
+
+  const expandedSequence: Array<{ id: string; runner: Runner; slotIdx: number; slotTotal: number; isRelay: boolean; groupTag?: string }> = []
+  const pushRunnerFromSlot = (r: Runner, fromSlot: number, groupTag?: string) => {
     const planned = Math.max(1, r.plannedLaps || 1)
-    for (let k = 0; k < planned; k++) {
-      expandedSequence.push({ id, runner: r, slotIdx: k + 1, slotTotal: planned, isRelay: k === planned - 1 })
+    for (let k = fromSlot; k < planned; k++) {
+      expandedSequence.push({ id: r.id, runner: r, slotIdx: k + 1, slotTotal: planned, isRelay: k === planned - 1, groupTag })
     }
-  })
+  }
+
+  // 1) Current runner's REMAINING laps in current stint (skip if all done already → relai imminent)
+  if (currentRunner) {
+    const planned = Math.max(1, currentRunner.plannedLaps || 1)
+    if (lapsDoneCurrent < planned) {
+      pushRunnerFromSlot(currentRunner, lapsDoneCurrent, groupActiveName ?? undefined)
+    }
+  }
+
+  // 2) After current runner finishes — group mode (if active) consumes N relays then normal rotation
+  // Determine where to start in the order rotation (after current runner)
+  const startIdx = (currentIdx != null && order.length > 0) ? (currentIdx + 1) % order.length : 0
+  const orderedAfterCurrent: string[] = []
+  for (let i = 0; i < activeOrder.length; i++) {
+    const id = order[(startIdx + i) % order.length]
+    if (activeOrder.includes(id) && id !== currentRunnerId) orderedAfterCurrent.push(id)
+  }
+
+  if (groupActiveName) {
+    // Remaining group relays (counts the current one if currentRunner is in group and stint not done)
+    let remaining = activeGroupEntry?.remainingRelays ?? 0
+    // If current runner is in the group AND has remaining laps, his upcoming relai consumes 1
+    if (currentRunner?.group === groupActiveName && lapsDoneCurrent < (currentRunner.plannedLaps || 1)) {
+      remaining = Math.max(0, remaining - 1)
+    }
+    const groupOrder = orderedAfterCurrent.filter(id => getRunner(id)?.group === groupActiveName)
+    let i = 0
+    let safety = 0
+    while (remaining > 0 && groupOrder.length > 0 && safety < 100) {
+      const id = groupOrder[i % groupOrder.length]
+      const r = getRunner(id)
+      if (r) {
+        pushRunnerFromSlot(r, 0, groupActiveName)
+        remaining--
+      }
+      i++
+      safety++
+    }
+    // After the group quota → normal rotation from where we are (use full activeOrder)
+    activeOrder.forEach(id => {
+      const r = getRunner(id)
+      if (r) pushRunnerFromSlot(r, 0)
+    })
+  } else {
+    // Normal rotation starting after current runner
+    orderedAfterCurrent.forEach(id => {
+      const r = getRunner(id)
+      if (r) pushRunnerFromSlot(r, 0)
+    })
+    // Then loop back to current runner's group again (full cycle)
+    activeOrder.forEach(id => {
+      if (id === currentRunnerId) return
+      const r = getRunner(id)
+      if (r) pushRunnerFromSlot(r, 0)
+    })
+  }
 
   const totalMs = expandedSequence.reduce((a, s) => a + kmPaceToLapMs(s.runner.kmMin, s.runner.kmSec), 0)
 
@@ -477,13 +555,32 @@ export function PlanningScreen({
               </div>
               <div className="grid" style={{ gap: 6 }}>
                 {(() => {
-                  const startMs = schedule?.startISO ? new Date(schedule.startISO).getTime() : null
+                  // Anchor for ETA projection: race-running → use live clock, else scheduled, else now
+                  const now = Date.now()
+                  const startMs = raceStartTime
+                    ? now
+                    : (schedule?.startISO ? new Date(schedule.startISO).getTime() : now)
                   let cum = 0
+                  let firstCurrentSeen = false
                   return expandedSequence.slice(0, 12).map((s, i) => {
                     const r = s.runner
-                    const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+                    let lapMs: number
+                    if (r.id === currentRunnerId && currentRunnerExpectedLapMs && currentRunnerExpectedLapMs > 0) {
+                      // All current-runner laps use his ACTUAL effective pace (live or override)
+                      lapMs = currentRunnerExpectedLapMs
+                      // First occurrence: subtract elapsed already counted in current lap (live tick → real-time)
+                      if (!firstCurrentSeen && currentLapStartedAt) {
+                        const elapsed = Math.max(0, Date.now() - currentLapStartedAt)
+                        lapMs = Math.max(0, lapMs - elapsed)
+                        firstCurrentSeen = true
+                      } else if (!firstCurrentSeen) {
+                        firstCurrentSeen = true
+                      }
+                    } else {
+                      lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+                    }
                     cum += lapMs
-                    const eta = startMs ? new Date(startMs + cum) : null
+                    const eta = new Date(startMs + cum)
                     return (
                       <div
                         key={i}
@@ -526,6 +623,21 @@ export function PlanningScreen({
                           <span className="mono" style={{ color: 'var(--muted)', fontSize: 11, whiteSpace: 'nowrap', flexShrink: 0 }}>
                             {s.slotIdx}/{s.slotTotal}
                           </span>
+                          {s.groupTag && (
+                            <span
+                              className="badge"
+                              style={{
+                                fontSize: 10,
+                                flexShrink: 0,
+                                background: 'oklch(0.78 0.18 80 / 0.18)',
+                                color: 'oklch(0.92 0.16 80)',
+                                border: '1px solid oklch(0.78 0.18 80 / 0.4)',
+                              }}
+                              title={`Mode groupe ${s.groupTag} actif`}
+                            >
+                              ▶ Grp {s.groupTag}
+                            </span>
+                          )}
                           {s.isRelay && s.slotTotal > 1 && (
                             <span className="badge accent" style={{ fontSize: 10, flexShrink: 0 }}>
                               relais
@@ -535,20 +647,19 @@ export function PlanningScreen({
                         <span className="mono" style={{ color: 'var(--text-2)', fontSize: 13, flexShrink: 0, whiteSpace: 'nowrap' }}>
                           {fmtKmPace(r.kmMin, r.kmSec)}
                         </span>
-                        {eta && (
-                          <span
-                            className="mono"
-                            style={{
-                              color: 'var(--accent)',
-                              fontSize: 12,
-                              textAlign: 'right',
-                              flexShrink: 0,
-                              whiteSpace: 'nowrap',
-                            }}
-                          >
-                            → {String(eta.getHours()).padStart(2, '0')}:{String(eta.getMinutes()).padStart(2, '0')}:{String(eta.getSeconds()).padStart(2, '0')}
-                          </span>
-                        )}
+                        <span
+                          className="mono"
+                          style={{
+                            color: 'var(--accent)',
+                            fontSize: 12,
+                            textAlign: 'right',
+                            flexShrink: 0,
+                            whiteSpace: 'nowrap',
+                          }}
+                          title="Heure réelle Paris du passage estimé"
+                        >
+                          🕒 {eta.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Paris' })}
+                        </span>
                       </div>
                     )
                   })

@@ -106,8 +106,14 @@ export const recordLap = mutation({
       { runnerOverride: effectiveRunnerOverride, bypassDebounce: true, replaces },
     )
 
-    // Resume cron auto-tick after a manual action
-    await ctx.db.patch(args.teamId, { autoPaused: false, updatedAt: now })
+    // Resume cron auto-tick after a manual action + arm a cooldown so the cron stays out
+    // for the admin-configured window (replaceAutoWindowSec).
+    const cooldownMs = ((event?.replaceAutoWindowSec ?? DEFAULT_REPLACE_AUTO_WINDOW_SEC) as number) * 1000
+    await ctx.db.patch(args.teamId, {
+      autoPaused: false,
+      cronCooldownUntil: now + cooldownMs,
+      updatedAt: now,
+    })
 
     // Server-side auto-calibration: update runner.liveKm from the manual lap time.
     // Use admin-configured lap time bounds so test mode (short laps) calibrates too.
@@ -166,6 +172,7 @@ export const autoTick = mutation({
         .withIndex('by_event', (q) => q.eq('eventId', event._id))
         .collect()
 
+      const tickNow = Date.now()
       for (const team of teams) {
         if (!team.ready) {
           skipped.push({ teamId: team._id, reason: 'not ready' })
@@ -175,8 +182,12 @@ export const autoTick = mutation({
           skipped.push({ teamId: team._id, reason: 'auto paused' })
           continue
         }
+        if ((team as any).cronCooldownUntil && tickNow < (team as any).cronCooldownUntil) {
+          skipped.push({ teamId: team._id, reason: `cron cooldown ${(team as any).cronCooldownUntil - tickNow}ms` })
+          continue
+        }
         try {
-          const decision = await decideAutoLap(ctx, team, event.actualStart)
+          const decision = await decideAutoLap(ctx, team, event.actualStart, event)
           if (!decision) {
             skipped.push({ teamId: team._id, reason: 'decideAutoLap=null' })
             continue
@@ -199,7 +210,8 @@ export const autoTick = mutation({
 async function decideAutoLap(
   ctx: any,
   team: any,
-  raceStartMs: number | null
+  raceStartMs: number | null,
+  event?: any,
 ): Promise<LapType | null> {
   if (!raceStartMs) return null
 
@@ -236,21 +248,21 @@ async function decideAutoLap(
   const elapsed = now - lastLapAt
   if (elapsed < MIN_LAP_GAP_MS) throw new Error(`decide:debounce elapsed=${elapsed}<${MIN_LAP_GAP_MS}`)
 
-  // Expected lap duration (live pace > pace estim > fallback 6:00/km)
-  // Reject absurd live pace (must be 2:00..15:00/km), fall back to estimated.
-  const liveSecPerKm = (runner.liveKmMin ?? -1) * 60 + (runner.liveKmSec ?? 0)
-  const liveOk =
-    runner.liveKmMin != null &&
-    runner.liveKmSec != null &&
-    liveSecPerKm >= 2 * 60 &&
-    liveSecPerKm <= 15 * 60
+  // Expected lap duration (live pace > pace estim).
+  // Use admin lap-time bounds to validate live pace (test mode supports very short laps).
+  const minLapMs = (((event?.minLapSec ?? 165) as number) * 1000)
+  const maxLapMs = (((event?.maxLapSec ?? 480) as number) * 1000)
+  const lapDistanceM = 900
+  const liveLapMs = (runner.liveKmMin != null && runner.liveKmSec != null)
+    ? Math.round(((runner.liveKmMin * 60 + runner.liveKmSec) * lapDistanceM) / 1000) * 1000
+    : 0
+  const liveOk = liveLapMs > 0 && liveLapMs >= minLapMs && liveLapMs <= maxLapMs
   const kmMin = liveOk ? runner.liveKmMin : (runner.kmMin ?? 6)
   const kmSec = liveOk ? runner.liveKmSec : (runner.kmSec ?? 0)
-  const lapDistanceM = 900
   const paceSec = kmMin * 60 + kmSec
   const expectedLapMs = Math.round((paceSec * lapDistanceM) / 1000) * 1000
-  // Defensive: never fire if computed expected is unrealistically short (< 30s)
-  if (expectedLapMs < 30 * 1000) throw new Error(`decide:expected too short=${expectedLapMs}`)
+  // Defensive: never fire below the admin min-lap floor
+  if (expectedLapMs < minLapMs) throw new Error(`decide:expected too short=${expectedLapMs} < ${minLapMs}`)
 
   // Tolerance: only auto-trigger when expected time is reached or slightly past
   if (elapsed < expectedLapMs) throw new Error(`decide:not ready elapsed=${elapsed}<expected=${expectedLapMs} runner=${runner.name}`)
@@ -570,6 +582,12 @@ export const deleteLap = mutation({
 
     // Delete the lap first
     await ctx.db.delete(args.lapId)
+
+    // Arm cron cooldown so cron doesn't immediately re-fire after undo (gives user time to redo manually)
+    const team = await ctx.db.get(lap.teamId)
+    const event = team ? await ctx.db.get(team.eventId) : null
+    const cooldownMs = ((event?.replaceAutoWindowSec ?? 180) as number) * 1000
+    await ctx.db.patch(lap.teamId, { cronCooldownUntil: now + cooldownMs })
 
     // Restore team.currentIdx + groupModeQueue using the snapshot taken at insert time (most accurate)
     const prevGroupQueue = (lap as any).prevGroupModeQueue
