@@ -256,6 +256,22 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
                             <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {current?.name || '—'}
                             </span>
+                            {current?.status === 'uncertain' && (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                  background: 'oklch(0.82 0.17 70 / 0.18)',
+                                  color: 'oklch(0.82 0.17 70)',
+                                  border: '1px solid oklch(0.82 0.17 70 / 0.5)',
+                                  flexShrink: 0,
+                                }}
+                                title="Coureur incertain"
+                              >
+                                ?
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>

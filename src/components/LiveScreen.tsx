@@ -720,7 +720,26 @@ export function LiveScreen({
                     disabled={!canClick}
                     onClick={() => recordLap(true)}
                   >
-                    <span className="label-top">Relai → {nextRunner?.name || '—'}</span>
+                    <span className="label-top">
+                      Relai → {nextRunner?.name || '—'}
+                      {nextRunner?.status === 'uncertain' && (
+                        <span
+                          className="badge"
+                          style={{
+                            marginLeft: 6,
+                            fontSize: 10,
+                            background: 'oklch(0.82 0.17 70 / 0.20)',
+                            color: 'oklch(0.92 0.17 70)',
+                            border: '1px solid oklch(0.82 0.17 70 / 0.55)',
+                            padding: '1px 5px',
+                            borderRadius: 4,
+                          }}
+                          title="Coureur incertain"
+                        >
+                          ? Incertain
+                        </span>
+                      )}
+                    </span>
                     <span className="label-main mono">
                       {!race.started ? '—' : team?.autoPaused ? '⏸ PAUSE' : etaRelay > 0 ? `Estim. ${fmtLap(etaRelay)}` : 'maintenant'}
                     </span>
