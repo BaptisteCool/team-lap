@@ -1,4 +1,4 @@
-import { v } from 'convex/values'
+import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 
 // List all events
@@ -193,7 +193,13 @@ export const setMaxRunnersPerTeam = mutation({
         .collect()
       const active = runners.filter((r: any) => r.status !== 'out').length
       if (active > value) {
-        throw new Error(`Équipe "${team.name}" a ${active} coureurs actifs — réduire d'abord avant de baisser à ${value}.`)
+        throw new ConvexError({
+          code: 'TEAM_CAPACITY_EXCEEDED',
+          teamName: team.name,
+          activeCount: active,
+          requested: value,
+          message: `Équipe "${team.name}" a ${active} coureurs actifs — réduire d'abord avant de baisser à ${value}.`,
+        })
       }
     }
     await ctx.db.patch(args.eventId, { maxRunnersPerTeam: value, updatedAt: Date.now() })

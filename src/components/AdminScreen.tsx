@@ -632,7 +632,9 @@ export function AdminScreen({
                         await onSetMaxRunnersPerTeam?.(v)
                         pushToast(`Max coureurs/équipe → ${v}`, 'Check')
                       } catch (err: any) {
-                        pushToast(err?.message || 'Erreur capacité', 'AlertTriangle')
+                        // ConvexError data carries human-readable .message; fallback to native message string
+                        const msg = err?.data?.message || err?.message || 'Erreur capacité'
+                        pushToast(msg, 'AlertTriangle')
                         e.target.value = String(evMaxRunners)
                       }
                     }}
