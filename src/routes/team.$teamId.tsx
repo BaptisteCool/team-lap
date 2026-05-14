@@ -181,6 +181,14 @@ function TeamPage() {
           }
         }
       }
+      // Auto-sync teamOrder: append newly added runner ids, drop deleted ones
+      setOrderPersist((prevOrder) => {
+        const nextIds = new Set(next.map((r: any) => r.id))
+        const kept = prevOrder.filter((id) => nextIds.has(id))
+        const newIds = next.map((r: any) => r.id).filter((id: string) => !kept.includes(id))
+        if (newIds.length === 0 && kept.length === prevOrder.length) return prevOrder
+        return [...kept, ...newIds]
+      })
       return next
     })
   }

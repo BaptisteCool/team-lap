@@ -70,6 +70,8 @@ export function PlanningScreen({
   const [editRunnerId, setEditRunnerId] = useState<string | null>(null)
   const [groupModeFor, setGroupModeFor] = useState<string | null>(null)
   const [groupModeNb, setGroupModeNb] = useState(2)
+  // Filter "Prochains passages" on a single runner (null = all). Not persisted.
+  const [filterRunnerId, setFilterRunnerId] = useState<string | null>(null)
   // Tick to refresh ETAs in real time (current runner's elapsed lap + group queue countdowns)
   const [, setTick] = useState(0)
   useEffect(() => {
@@ -205,6 +207,27 @@ export function PlanningScreen({
       const r = getRunner(id)
       if (r) pushRunnerFromSlot(r, 0)
     })
+  }
+
+  // Filter mode: extend expandedSequence with extra cycles until we find at least N
+  // matches for the filtered runner (or hit safety cap). The unfiltered preview keeps
+  // its current short window so default UX is unchanged.
+  const FILTER_TARGET_MATCHES = 3
+  const FILTER_MAX_ITERATIONS = 500
+  if (filterRunnerId && activeOrder.length > 0) {
+    let safety = 0
+    let matches = expandedSequence.filter(s => s.id === filterRunnerId).length
+    while (matches < FILTER_TARGET_MATCHES && safety < FILTER_MAX_ITERATIONS) {
+      const before = expandedSequence.length
+      activeOrder.forEach(id => {
+        const r = getRunner(id)
+        if (r) pushRunnerFromSlot(r, 0)
+      })
+      // Defensive: if appending nothing (all plannedLaps=0), break to avoid infinite loop
+      if (expandedSequence.length === before) break
+      matches = expandedSequence.filter(s => s.id === filterRunnerId).length
+      safety++
+    }
   }
 
   const totalMs = expandedSequence.reduce((a, s) => a + kmPaceToLapMs(s.runner.kmMin, s.runner.kmSec), 0)
@@ -550,8 +573,43 @@ export function PlanningScreen({
               <h3>Prochains passages</h3>
             </div>
             <div className="card-body">
+              {/* Filter on a runner — null = all */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                <label className="hint" style={{ fontSize: 12 }}>Filtrer :</label>
+                <select
+                  value={filterRunnerId ?? ''}
+                  onChange={(e) => setFilterRunnerId(e.target.value || null)}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: 13,
+                    background: 'var(--bg-2)',
+                    color: 'var(--text)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 6,
+                  }}
+                >
+                  <option value="">Tous les coureurs</option>
+                  {activeOrder.map(id => {
+                    const r = getRunner(id)
+                    if (!r) return null
+                    return <option key={id} value={id}>{r.name}</option>
+                  })}
+                </select>
+                {filterRunnerId && (
+                  <button
+                    className="btn ghost"
+                    style={{ fontSize: 12, padding: '3px 8px' }}
+                    onClick={() => setFilterRunnerId(null)}
+                    title="Réinitialiser le filtre"
+                  >
+                    ✕ Réinitialiser
+                  </button>
+                )}
+              </div>
               <div className="hint" style={{ marginBottom: 10 }}>
-                Aperçu des {Math.min(12, expandedSequence.length)} prochains tours selon les tours prévus de chaque coureur :
+                {filterRunnerId
+                  ? `Prochains passages de ${getRunner(filterRunnerId)?.name ?? '—'} :`
+                  : `Aperçu des ${Math.min(12, expandedSequence.length)} prochains tours selon les tours prévus de chaque coureur :`}
               </div>
               <div className="grid" style={{ gap: 6 }}>
                 {(() => {
@@ -562,7 +620,8 @@ export function PlanningScreen({
                     : (schedule?.startISO ? new Date(schedule.startISO).getTime() : now)
                   let cum = 0
                   let firstCurrentSeen = false
-                  return expandedSequence.slice(0, 12).map((s, i) => {
+                  // Walk full expandedSequence to compute proper cumulative ETAs, then filter for display
+                  const enriched = expandedSequence.map((s, i) => {
                     const r = s.runner
                     let lapMs: number
                     if (r.id === currentRunnerId && currentRunnerExpectedLapMs && currentRunnerExpectedLapMs > 0) {
@@ -580,10 +639,25 @@ export function PlanningScreen({
                       lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
                     }
                     cum += lapMs
-                    const eta = new Date(startMs + cum)
+                    return { s, eta: new Date(startMs + cum), originalIdx: i }
+                  })
+                  const visible = filterRunnerId
+                    ? enriched.filter(x => x.s.id === filterRunnerId).slice(0, FILTER_TARGET_MATCHES)
+                    : enriched.slice(0, 12)
+                  if (visible.length === 0 && filterRunnerId) {
+                    return (
+                      <div className="empty" style={{ padding: '12px 10px' }}>
+                        Aucun passage planifié pour ce coureur.
+                      </div>
+                    )
+                  }
+                  return visible.map(({ s, eta, originalIdx }, idx) => {
+                    const r = s.runner
+                    // Display # = original position in full sequence (so filter mode shows real rank)
+                    const displayNum = filterRunnerId ? originalIdx + 1 : idx + 1
                     return (
                       <div
-                        key={i}
+                        key={originalIdx}
                         className="plan-preview-row"
                         style={{
                           display: 'flex',
@@ -597,7 +671,7 @@ export function PlanningScreen({
                         }}
                       >
                         <span className="mono" style={{ color: 'var(--muted)', width: 26, flexShrink: 0 }}>
-                          {String(i + 1).padStart(2, '0')}
+                          {String(displayNum).padStart(2, '0')}
                         </span>
                         <span style={{ width: 8, height: 8, borderRadius: 999, background: r.color, flexShrink: 0 }} />
                         <span
