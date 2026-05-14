@@ -170,14 +170,22 @@ function TeamPage() {
                 liveKmMin: r.liveKmMin ?? undefined,
                 liveKmSec: r.liveKmSec ?? undefined,
               },
-            }).catch((err: any) => console.error('upsert runner failed:', err))
+            }).catch((err: any) => {
+              const msg = err?.data?.message || err?.message || 'Erreur enregistrement coureur'
+              pushToast(msg, 'AlertTriangle')
+              // Rollback optimistic UI to prev snapshot
+              setRunners(prev as any)
+            })
           }
         }
         for (const id of prevIds) {
           if (!nextIds.has(id)) {
-            deleteRunnerMutation({ teamId: teamData._id, runnerLocalId: id as string }).catch((err: any) =>
-              console.error('delete runner failed:', err),
-            )
+            deleteRunnerMutation({ teamId: teamData._id, runnerLocalId: id as string }).catch((err: any) => {
+              const msg = err?.data?.message || err?.message || 'Suppression refusée'
+              pushToast(msg, 'AlertTriangle')
+              // Rollback: re-insert the deleted runner
+              setRunners(prev as any)
+            })
           }
         }
       }
@@ -380,6 +388,7 @@ function TeamPage() {
             minLapSec={(event as any)?.minLapSec ?? 165}
             maxLapSec={(event as any)?.maxLapSec ?? 480}
             maxRunnersPerTeam={(event as any)?.maxRunnersPerTeam ?? 10}
+            canDeleteRunner={(event as any)?.status === 'scheduled'}
           />
         )}
         {activeTab === 'planning' && (
