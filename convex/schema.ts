@@ -48,6 +48,9 @@ export default defineSchema({
     // Physical lap time bounds (seconds) — used by form validation. Defaults: 165 (2:45) and 480 (8:00).
     minLapSec: v.optional(v.number()),
     maxLapSec: v.optional(v.number()),
+
+    // Max runners per team (uniform across all teams of this event). Default 10.
+    maxRunnersPerTeam: v.optional(v.number()),
     
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -79,7 +82,9 @@ export default defineSchema({
     goalLaps: v.number(), // target laps
     
     // Team configuration
-    maxRunners: v.number(),
+    // DEPRECATED: per-team capacity. Source of truth is event.maxRunnersPerTeam.
+    // Kept optional during transition to avoid breaking existing data.
+    maxRunners: v.optional(v.number()),
     ready: v.boolean(), // marked as ready for race start
     autoPaused: v.optional(v.boolean()), // when true, cron skips auto laps for this team until next manual action
     cronCooldownUntil: v.optional(v.number()), // timestamp until which cron autoTick must skip this team (set after manual record)

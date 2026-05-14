@@ -174,6 +174,33 @@ export const updateReplaceAutoWindow = mutation({
   },
 })
 
+// Default value when event has no explicit setting.
+export const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
+
+// Set max runners per team at event level. Refuses if any team would exceed.
+export const setMaxRunnersPerTeam = mutation({
+  args: { eventId: v.id('events'), value: v.number() },
+  handler: async (ctx, args) => {
+    const value = Math.max(1, Math.min(50, Math.round(args.value)))
+    const teams = await ctx.db
+      .query('teams')
+      .withIndex('by_event', (q) => q.eq('eventId', args.eventId))
+      .collect()
+    for (const team of teams) {
+      const runners = await ctx.db
+        .query('runners')
+        .withIndex('by_team', (q) => q.eq('teamId', team._id))
+        .collect()
+      const active = runners.filter((r: any) => r.status !== 'out').length
+      if (active > value) {
+        throw new Error(`Équipe "${team.name}" a ${active} coureurs actifs — réduire d'abord avant de baisser à ${value}.`)
+      }
+    }
+    await ctx.db.patch(args.eventId, { maxRunnersPerTeam: value, updatedAt: Date.now() })
+    return value
+  },
+})
+
 export const updateLapBounds = mutation({
   args: {
     eventId: v.id('events'),
