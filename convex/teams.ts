@@ -66,6 +66,97 @@ export const setAutoPaused = mutation({
   },
 })
 
+// ─── Group-relay mode ──────────────────────────────────────────────────────
+
+async function resolveCurrentRunnerGroup(ctx: any, teamId: any) {
+  const team = await ctx.db.get(teamId)
+  if (!team) return { team: null, currentRunner: null }
+  const order = await ctx.db
+    .query('teamOrder')
+    .withIndex('by_team', (q: any) => q.eq('teamId', teamId))
+    .first()
+  const runners = await ctx.db
+    .query('runners')
+    .withIndex('by_team', (q: any) => q.eq('teamId', teamId))
+    .collect()
+  let currentRunner: any = null
+  if (order && order.order.length > 0) {
+    const currentLocalId = order.order[(team.currentIdx || 0) % order.order.length]
+    currentRunner = runners.find((r: any) => r.id === currentLocalId) || null
+  }
+  return { team, currentRunner }
+}
+
+// Set or clear a runner's group membership
+export const setRunnerGroup = mutation({
+  args: { teamId: v.id('teams'), runnerLocalId: v.string(), group: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const runners = await ctx.db
+      .query('runners')
+      .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
+      .collect()
+    const r = runners.find((x) => x.id === args.runnerLocalId)
+    if (!r) return null
+    const cleaned = (args.group ?? '').trim().slice(0, 12)
+    await ctx.db.patch(r._id, { group: cleaned ? cleaned : undefined })
+    return r._id
+  },
+})
+
+// Append a group-mode entry to the team's queue
+export const enqueueGroupMode = mutation({
+  args: { teamId: v.id('teams'), groupName: v.string(), remainingRelays: v.number() },
+  handler: async (ctx, args) => {
+    const cleanedName = args.groupName.trim().slice(0, 12)
+    if (!cleanedName) return null
+    const N = Math.max(1, Math.min(30, Math.round(args.remainingRelays)))
+    const { team, currentRunner } = await resolveCurrentRunnerGroup(ctx, args.teamId)
+    if (!team) return null
+    const queue = ((team as any).groupModeQueue || []) as Array<{ groupName: string; remainingRelays: number; status: 'active' | 'pending' }>
+    let newStatus: 'active' | 'pending' = 'pending'
+    if (queue.length === 0) {
+      newStatus = currentRunner?.group === cleanedName ? 'active' : 'pending'
+    }
+    const next = [...queue, { groupName: cleanedName, remainingRelays: N, status: newStatus }]
+    await ctx.db.patch(args.teamId, { groupModeQueue: next, updatedAt: Date.now() })
+    return next
+  },
+})
+
+// Remove a queue entry by index
+export const cancelGroupModeEntry = mutation({
+  args: { teamId: v.id('teams'), index: v.number() },
+  handler: async (ctx, args) => {
+    const { team, currentRunner } = await resolveCurrentRunnerGroup(ctx, args.teamId)
+    if (!team) return null
+    const queue = ((team as any).groupModeQueue || []) as Array<{ groupName: string; remainingRelays: number; status: 'active' | 'pending' }>
+    if (args.index < 0 || args.index >= queue.length) return null
+    const next = queue.filter((_, i) => i !== args.index)
+    if (args.index === 0 && next.length > 0) {
+      next[0] = { ...next[0], status: currentRunner?.group === next[0].groupName ? 'active' : 'pending' }
+    }
+    await ctx.db.patch(args.teamId, { groupModeQueue: next.length > 0 ? next : undefined, updatedAt: Date.now() })
+    return next
+  },
+})
+
+// Stop the active head only (keeps pending entries)
+export const stopActiveGroupMode = mutation({
+  args: { teamId: v.id('teams') },
+  handler: async (ctx, args) => {
+    const { team, currentRunner } = await resolveCurrentRunnerGroup(ctx, args.teamId)
+    if (!team) return null
+    const queue = ((team as any).groupModeQueue || []) as Array<{ groupName: string; remainingRelays: number; status: 'active' | 'pending' }>
+    if (queue.length === 0) return null
+    const next = queue.slice(1)
+    if (next.length > 0) {
+      next[0] = { ...next[0], status: currentRunner?.group === next[0].groupName ? 'active' : 'pending' }
+    }
+    await ctx.db.patch(args.teamId, { groupModeQueue: next.length > 0 ? next : undefined, updatedAt: Date.now() })
+    return next
+  },
+})
+
 // Update or insert team order (relay sequence of runner local ids)
 export const setTeamOrder = mutation({
   args: {
@@ -99,6 +190,7 @@ export const upsertRunner = mutation({
       color: v.optional(v.string()),
       status: v.optional(v.string()),
       gender: v.optional(v.string()),
+      group: v.optional(v.string()),
       liveKmMin: v.optional(v.number()),
       liveKmSec: v.optional(v.number()),
     }),

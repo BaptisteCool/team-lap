@@ -1,5 +1,6 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import { computeNextRunnerIdx, consumeQueueOnRelay, type GroupModeEntry } from './lib/nextRunner'
 
 // Min interval between two laps for the same team (debounce)
 const MIN_LAP_GAP_MS = 5000
@@ -333,6 +334,7 @@ async function applyLap(
   // Snapshot team.currentIdx BEFORE this lap (after any prior auto-replace rollback) so undo can restore.
   const teamFresh = await ctx.db.get(teamId)
   const prevCurrentIdx = teamFresh?.currentIdx ?? 0
+  const prevGroupModeQueue = ((teamFresh as any)?.groupModeQueue || undefined) as GroupModeEntry[] | undefined
   // Snapshot runner.plannedLaps at insert time (for tour +/- badges later, immune to runner config edits)
   const runnerForLap = runners.find((r: any) => r.id === currentRunnerLocalId)
   const plannedAtStart = runnerForLap?.plannedLaps ?? undefined
@@ -348,14 +350,27 @@ async function applyLap(
     prevCurrentIdx,
     plannedAtStart,
     replaces: opts.replaces,
+    prevGroupModeQueue,
   })
 
   if (isRelay) {
-    const nextIdx = (prevCurrentIdx + 1) % order.order.length
-    await ctx.db.patch(teamId, { currentIdx: nextIdx, updatedAt: now })
-    // Reset incoming runner's live pace so they start the relay on their configured target (kmMin/kmSec)
+    // Compute next runner via shared helper — respects group-mode active entry if any
+    const nextIdx = computeNextRunnerIdx({
+      order: order.order,
+      runners: runners as any,
+      currentIdx: prevCurrentIdx,
+      groupModeQueue: prevGroupModeQueue || null,
+    })
     const nextRunnerLocalId = order.order[nextIdx]
     const nextRunnerDoc = runners.find((r: any) => r.id === nextRunnerLocalId)
+    // Consume queue (decrement remainingRelays, recompute head status)
+    const newQueue = consumeQueueOnRelay(prevGroupModeQueue, nextRunnerDoc as any)
+    await ctx.db.patch(teamId, {
+      currentIdx: nextIdx,
+      updatedAt: now,
+      groupModeQueue: newQueue,
+    })
+    // Reset incoming runner's live pace so they start the relay on their configured target (kmMin/kmSec)
     if (nextRunnerDoc) {
       await ctx.db.patch(nextRunnerDoc._id, { liveKmMin: undefined, liveKmSec: undefined })
     }
@@ -556,9 +571,14 @@ export const deleteLap = mutation({
     // Delete the lap first
     await ctx.db.delete(args.lapId)
 
-    // Restore team.currentIdx using the snapshot taken at insert time (most accurate)
+    // Restore team.currentIdx + groupModeQueue using the snapshot taken at insert time (most accurate)
+    const prevGroupQueue = (lap as any).prevGroupModeQueue
     if (snapshotPrevIdx != null) {
-      await ctx.db.patch(lap.teamId, { currentIdx: snapshotPrevIdx, updatedAt: now })
+      await ctx.db.patch(lap.teamId, {
+        currentIdx: snapshotPrevIdx,
+        groupModeQueue: prevGroupQueue ?? undefined,
+        updatedAt: now,
+      })
     } else if (lap.type === 'relay_manual' || lap.type === 'relay_auto') {
       // Legacy laps without snapshot — fall back to simple decrement
       const team = await ctx.db.get(lap.teamId)

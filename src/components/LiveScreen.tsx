@@ -30,6 +30,7 @@ interface Runner {
   plannedLaps: number
   liveKmMin?: number | null
   liveKmSec?: number | null
+  group?: string
 }
 
 interface Lap {
@@ -73,7 +74,7 @@ interface LiveScreenProps {
   ranking?: Ranking
   setRanking?: React.Dispatch<React.SetStateAction<Ranking>>
   onBack: () => void
-  team?: { name?: string; color?: string; ready?: boolean; autoPaused?: boolean }
+  team?: { name?: string; color?: string; ready?: boolean; autoPaused?: boolean; groupModeQueue?: Array<{ groupName: string; remainingRelays: number; status: 'active' | 'pending' }> }
   setTeamReady?: (ready: boolean) => void
   onRecordLap?: (change: boolean, runnerId: string) => Promise<{ docId?: any; lapId?: string } | unknown> | void
   onUndoLap?: (docId: string) => void
@@ -155,7 +156,24 @@ export function LiveScreen({
   // DB-driven current runner (advances after manual / auto relay)
   const currentRunnerId = order[race.currentIdx % Math.max(1, order.length)]
   const currentRunner = getRunner(currentRunnerId)
-  const nIdx = nextActiveIdx(order, runners, race.currentIdx)
+  // Active group-mode entry — affects next runner computation if status='active'
+  const activeGroupEntry = team?.groupModeQueue && team.groupModeQueue.length > 0
+    ? team.groupModeQueue[0]
+    : null
+  const groupActive = activeGroupEntry?.status === 'active' ? activeGroupEntry : null
+  // Compute next runner: if group active and there is at least one other group member non-out → restrict
+  let nIdx = nextActiveIdx(order, runners, race.currentIdx)
+  if (groupActive) {
+    const groupMemberIdx = (() => {
+      for (let i = 1; i <= order.length; i++) {
+        const idx = (race.currentIdx + i) % order.length
+        const r = runners.find((x) => x.id === order[idx])
+        if (r && r.status !== 'out' && r.group === groupActive.groupName) return idx
+      }
+      return -1
+    })()
+    if (groupMemberIdx >= 0) nIdx = groupMemberIdx
+  }
   const nextRunner = getRunner(order[nIdx])
 
   const realLaps = race.laps.filter(l => l.type !== 'position')
@@ -360,7 +378,40 @@ export function LiveScreen({
                 <Avatar name={currentRunner.name} color={currentRunner.color} size={56} />
                 <div className="runner-meta">
                   <div className="role">Coureur en piste · {String(race.currentIdx + 1).padStart(2, '0')} / {order.length}</div>
-                  <div className="name">{currentRunner.name}</div>
+                  <div className="name" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span>{currentRunner.name}</span>
+                    {currentRunner.group && (
+                      <span
+                        className="badge"
+                        style={{
+                          fontSize: 10,
+                          padding: '2px 8px',
+                          background: 'oklch(0.86 0.20 135 / 0.18)',
+                          color: 'oklch(0.92 0.20 135)',
+                          border: '1px solid oklch(0.86 0.20 135 / 0.4)',
+                        }}
+                      >
+                        Grp {currentRunner.group}
+                      </span>
+                    )}
+                    {activeGroupEntry && (
+                      <span
+                        className="badge"
+                        style={{
+                          fontSize: 10,
+                          padding: '2px 8px',
+                          background: activeGroupEntry.status === 'active' ? 'oklch(0.78 0.18 80 / 0.22)' : 'var(--bg-2)',
+                          color: activeGroupEntry.status === 'active' ? 'oklch(0.92 0.16 80)' : 'var(--muted)',
+                          border: '1px solid ' + (activeGroupEntry.status === 'active' ? 'oklch(0.78 0.18 80 / 0.5)' : 'var(--border)'),
+                        }}
+                        title={activeGroupEntry.status === 'active'
+                          ? `Mode groupe ${activeGroupEntry.groupName} actif — ${activeGroupEntry.remainingRelays} relais restants`
+                          : `Mode groupe ${activeGroupEntry.groupName} en attente (le coureur en piste n'appartient pas au groupe)`}
+                      >
+                        {activeGroupEntry.status === 'active' ? '▶' : '⏸'} Mode {activeGroupEntry.groupName} · {activeGroupEntry.remainingRelays}t
+                      </span>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
                     <StatusChip value={currentRunner.status} />
                     <EnergyBar value={currentRunner.energy} />

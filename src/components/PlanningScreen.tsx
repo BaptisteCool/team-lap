@@ -12,6 +12,13 @@ interface Runner {
   energy: number
   status: string
   plannedLaps: number
+  group?: string
+}
+
+export type GroupModeEntry = {
+  groupName: string
+  remainingRelays: number
+  status: 'active' | 'pending'
 }
 
 interface Schedule {
@@ -27,12 +34,32 @@ interface PlanningScreenProps {
   schedule: Schedule
   onContinue: () => void
   onBack: () => void
+  groupModeQueue?: GroupModeEntry[]
+  onSetRunnerGroup?: (runnerLocalId: string, group: string | undefined) => void
+  onEnqueueGroupMode?: (groupName: string, remainingRelays: number) => void
+  onCancelGroupModeEntry?: (index: number) => void
+  onStopActiveGroupMode?: () => void
 }
 
-export function PlanningScreen({ runners, setRunners, order, setOrder, schedule, onContinue, onBack }: PlanningScreenProps) {
+export function PlanningScreen({
+  runners,
+  setRunners,
+  order,
+  setOrder,
+  schedule,
+  onContinue,
+  onBack,
+  groupModeQueue,
+  onSetRunnerGroup,
+  onEnqueueGroupMode,
+  onCancelGroupModeEntry,
+  onStopActiveGroupMode,
+}: PlanningScreenProps) {
   const dragId = useRef<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
   const [editRunnerId, setEditRunnerId] = useState<string | null>(null)
+  const [groupModeFor, setGroupModeFor] = useState<string | null>(null)
+  const [groupModeNb, setGroupModeNb] = useState(2)
 
   function getRunner(id: string) {
     return runners.find(r => r.id === id)
@@ -167,6 +194,25 @@ export function PlanningScreen({ runners, setRunners, order, setOrder, schedule,
                       <span style={{ textDecoration: isOut ? 'line-through' : 'none' }}>{r.name}</span>
                       <StatusChip value={r.status} />
                       <EnergyBar value={r.energy} />
+                      {onSetRunnerGroup && (
+                        <input
+                          type="text"
+                          value={r.group ?? ''}
+                          onChange={(e) => onSetRunnerGroup(r.id, e.target.value || undefined)}
+                          placeholder="grp"
+                          maxLength={12}
+                          style={{
+                            width: 60,
+                            fontSize: 11,
+                            padding: '2px 6px',
+                            background: r.group ? 'oklch(0.86 0.20 135 / 0.18)' : 'var(--bg-2)',
+                            color: r.group ? 'oklch(0.92 0.20 135)' : 'var(--text-2)',
+                            border: '1px solid ' + (r.group ? 'oklch(0.86 0.20 135 / 0.5)' : 'var(--border)'),
+                            borderRadius: 6,
+                          }}
+                          title="Groupe (A, B, Nuit…) — vide = pas de groupe"
+                        />
+                      )}
                     </span>
                     <span className="plan-pace" style={{ position: 'relative' }}>
                       {fmtKmPace(r.kmMin, r.kmSec)}{' '}
@@ -267,6 +313,127 @@ export function PlanningScreen({ runners, setRunners, order, setOrder, schedule,
         </div>
 
         <div className="grid" style={{ gap: 18, alignContent: 'start' }}>
+          {/* Groupes — mode relai de groupe (issue #1) */}
+          {(onSetRunnerGroup || onEnqueueGroupMode) && (() => {
+            const groups = Array.from(new Set(runners.map(r => r.group).filter(Boolean) as string[])).sort()
+            const activeEntry = (groupModeQueue && groupModeQueue.length > 0) ? groupModeQueue[0] : null
+            return (
+              <div className="card">
+                <div className="card-head">
+                  <span>👥</span>
+                  <h3>Groupes</h3>
+                  <span className="hint" style={{ marginLeft: 'auto' }}>
+                    {groups.length} groupe{groups.length > 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="card-body grid" style={{ gap: 10 }}>
+                  <div className="hint">
+                    Assignez un groupe (A, B, "Nuit"…) à chaque coureur depuis sa carte. Lancez ensuite un mode "relai de groupe" pour que les autres se reposent.
+                  </div>
+                  {/* Active queue */}
+                  {groupModeQueue && groupModeQueue.length > 0 && (
+                    <div
+                      className="card"
+                      style={{
+                        background: activeEntry?.status === 'active' ? 'oklch(0.86 0.20 135 / 0.12)' : 'var(--bg-2)',
+                        border: '1px solid ' + (activeEntry?.status === 'active' ? 'oklch(0.86 0.20 135 / 0.4)' : 'var(--border)'),
+                        padding: 10,
+                      }}
+                    >
+                      <div className="field-label" style={{ marginBottom: 6 }}>
+                        Mode actif{activeEntry?.status === 'pending' ? ' (en attente — coureur en piste hors groupe)' : ''}
+                      </div>
+                      {groupModeQueue.map((entry, i) => (
+                        <div
+                          key={i}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '6px 8px',
+                            borderRadius: 8,
+                            background: i === 0 ? 'transparent' : 'var(--bg)',
+                            marginBottom: 4,
+                          }}
+                        >
+                          <span className="badge accent" style={{ fontSize: 11 }}>
+                            {i === 0 ? (entry.status === 'active' ? '▶' : '⏸') : '⏭'} Groupe {entry.groupName}
+                          </span>
+                          <span className="hint" style={{ flex: 1 }}>
+                            {entry.remainingRelays} relais{entry.remainingRelays > 1 ? '' : ''} restant{entry.remainingRelays > 1 ? 's' : ''}
+                          </span>
+                          {i === 0 && onStopActiveGroupMode && (
+                            <button
+                              className="btn ghost"
+                              style={{ fontSize: 11, padding: '4px 8px' }}
+                              onClick={() => {
+                                if (window.confirm(`Stopper le mode actif (groupe ${entry.groupName}) ?`)) onStopActiveGroupMode()
+                              }}
+                              title="Arrêter le mode actif (garde la queue)"
+                            >
+                              ⏹ Stop
+                            </button>
+                          )}
+                          {onCancelGroupModeEntry && (
+                            <button
+                              className="btn ghost icon"
+                              style={{ fontSize: 11, padding: 4 }}
+                              onClick={() => {
+                                if (window.confirm(`Supprimer cette entrée (groupe ${entry.groupName}) ?`)) onCancelGroupModeEntry(i)
+                              }}
+                              title="Supprimer cette entrée"
+                            >
+                              ✕
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Group buttons */}
+                  {groups.length === 0 ? (
+                    <div className="empty">Aucun groupe défini. Ouvrez ✎ sur une ligne de coureur pour assigner un groupe.</div>
+                  ) : (
+                    <div className="grid" style={{ gap: 8 }}>
+                      {groups.map((g) => {
+                        const members = runners.filter(r => r.group === g)
+                        return (
+                          <div
+                            key={g}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              padding: '8px 10px',
+                              borderRadius: 8,
+                              background: 'var(--bg-2)',
+                              border: '1px solid var(--border)',
+                            }}
+                          >
+                            <span className="badge accent" style={{ fontSize: 12 }}>Groupe {g}</span>
+                            <span className="hint" style={{ flex: 1 }}>
+                              {members.length} coureur{members.length > 1 ? 's' : ''} · {members.map(m => m.name).join(', ')}
+                            </span>
+                            {onEnqueueGroupMode && (
+                              <button
+                                className="btn"
+                                style={{ fontSize: 12, padding: '4px 10px' }}
+                                onClick={() => { setGroupModeFor(g); setGroupModeNb(2) }}
+                                title={`Lancer mode groupe ${g}`}
+                              >
+                                ▶ Lancer
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
+
           <div className="card">
             <div className="card-head">
               <span>⏱️</span>
@@ -392,6 +559,50 @@ export function PlanningScreen({ runners, setRunners, order, setOrder, schedule,
           </div>
         </div>
       </div>
+
+      {groupModeFor && onEnqueueGroupMode && (
+        <div className="modal-backdrop" onClick={() => setGroupModeFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h3>Lancer mode groupe {groupModeFor}</h3>
+              <button className="btn ghost icon" style={{ marginLeft: 'auto' }} onClick={() => setGroupModeFor(null)}>✕</button>
+            </div>
+            <div className="modal-body grid" style={{ gap: 12 }}>
+              <div className="hint">
+                Le groupe <strong>{groupModeFor}</strong> enchaînera les N relais demandés. Pendant ce temps, les autres coureurs se reposent. À la fin, retour au planning normal (ou prochain mode dans la queue).
+              </div>
+              <div className="field">
+                <span className="field-label">Nombre de relais *</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button type="button" className="btn" style={{ padding: '4px 12px', fontSize: 16 }} onClick={() => setGroupModeNb((n) => Math.max(1, n - 1))}>−</button>
+                  <input
+                    type="number"
+                    min="1"
+                    max="30"
+                    className="mono"
+                    value={groupModeNb}
+                    onChange={(e) => setGroupModeNb(Math.max(1, Math.min(30, +e.target.value || 1)))}
+                    style={{ width: 80, textAlign: 'center' }}
+                  />
+                  <button type="button" className="btn" style={{ padding: '4px 12px', fontSize: 16 }} onClick={() => setGroupModeNb((n) => Math.min(30, n + 1))}>+</button>
+                </div>
+              </div>
+            </div>
+            <div className="modal-foot">
+              <button className="btn ghost" onClick={() => setGroupModeFor(null)}>Annuler</button>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  onEnqueueGroupMode(groupModeFor, groupModeNb)
+                  setGroupModeFor(null)
+                }}
+              >
+                ✓ Lancer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

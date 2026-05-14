@@ -54,6 +54,10 @@ function TeamPage() {
   const upsertRunnerMutation = useMutation('teams:upsertRunner' as any)
   const deleteRunnerMutation = useMutation('teams:deleteRunner' as any)
   const setAutoPausedMutation = useMutation('teams:setAutoPaused' as any)
+  const setRunnerGroupMutation = useMutation('teams:setRunnerGroup' as any)
+  const enqueueGroupModeMutation = useMutation('teams:enqueueGroupMode' as any)
+  const cancelGroupModeEntryMutation = useMutation('teams:cancelGroupModeEntry' as any)
+  const stopActiveGroupModeMutation = useMutation('teams:stopActiveGroupMode' as any)
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const orderTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -107,6 +111,7 @@ function TeamPage() {
         color: teamData.color,
         ready: teamData.ready,
         autoPaused: teamData.autoPaused,
+        groupModeQueue: teamData.groupModeQueue,
         profileImage: teamData.profileImage,
         contactName: teamData.contactName,
         contactPhone: teamData.contactPhone,
@@ -123,6 +128,8 @@ function TeamPage() {
           status: r.status || 'ready',
           liveKmMin: r.liveKmMin ?? null,
           liveKmSec: r.liveKmSec ?? null,
+          gender: r.gender,
+          group: r.group,
         }))
         setRunners(augmented)
         const hasPersistedOrder = Array.isArray(teamData.order) && teamData.order.length > 0
@@ -375,6 +382,31 @@ function TeamPage() {
             schedule={schedule}
             onContinue={() => setActiveTab('live')}
             onBack={() => setActiveTab('setup')}
+            groupModeQueue={(team as any).groupModeQueue}
+            onSetRunnerGroup={(rid, group) => {
+              if (readonly || !teamData?._id) return
+              setRunnerGroupMutation({ teamId: teamData._id, runnerLocalId: rid, group }).catch((err: any) =>
+                console.error('setRunnerGroup:', err),
+              )
+            }}
+            onEnqueueGroupMode={(groupName, remainingRelays) => {
+              if (readonly || !teamData?._id) return
+              enqueueGroupModeMutation({ teamId: teamData._id, groupName, remainingRelays }).catch((err: any) =>
+                console.error('enqueueGroupMode:', err),
+              )
+            }}
+            onCancelGroupModeEntry={(index) => {
+              if (readonly || !teamData?._id) return
+              cancelGroupModeEntryMutation({ teamId: teamData._id, index }).catch((err: any) =>
+                console.error('cancelGroupModeEntry:', err),
+              )
+            }}
+            onStopActiveGroupMode={() => {
+              if (readonly || !teamData?._id) return
+              stopActiveGroupModeMutation({ teamId: teamData._id }).catch((err: any) =>
+                console.error('stopActiveGroupMode:', err),
+              )
+            }}
           />
         )}
         {activeTab === 'live' && (

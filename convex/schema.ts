@@ -92,7 +92,14 @@ export default defineSchema({
     
     // Race state
     currentIdx: v.number(), // current runner index in order
-    
+
+    // Group-relay mode queue — head = active/pending entry; rest = upcoming entries
+    groupModeQueue: v.optional(v.array(v.object({
+      groupName: v.string(),
+      remainingRelays: v.number(),
+      status: v.union(v.literal('active'), v.literal('pending')),
+    }))),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -125,6 +132,9 @@ export default defineSchema({
     color: v.optional(v.string()),
     status: v.optional(v.string()), // 'ready' | 'uncertain' | 'out'
     gender: v.optional(v.string()), // 'Homme' | 'Femme' | 'Autre'
+
+    // Optional sub-group membership ('A', 'B', 'Nuit', etc.) — used by group-relay mode
+    group: v.optional(v.string()),
 
     createdAt: v.number(),
   })
@@ -181,6 +191,13 @@ export default defineSchema({
       autoRelay: v.optional(v.boolean()),
       prevCurrentIdx: v.optional(v.number()),
     })),
+
+    // Snapshot of team.groupModeQueue BEFORE this lap was inserted (for clean undo of group-mode decrements)
+    prevGroupModeQueue: v.optional(v.array(v.object({
+      groupName: v.string(),
+      remainingRelays: v.number(),
+      status: v.union(v.literal('active'), v.literal('pending')),
+    }))),
   })
     .index('by_team', ['teamId'])
     .index('by_team_runner', ['teamId', 'runnerId'])
