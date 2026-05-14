@@ -41,6 +41,7 @@ function AdminPage() {
   const updatePasswordMutation = useMutation('events:updateAdminPassword' as any)
   const updateReplaceAutoWindowMutation = useMutation('events:updateReplaceAutoWindow' as any)
   const updateLapBoundsMutation = useMutation('events:updateLapBounds' as any)
+  const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
   const endItrMutation = useMutation('events:endInterruption' as any)
   const updateItrMutation = useMutation('events:updateInterruption' as any)
@@ -360,6 +361,11 @@ function AdminPage() {
         correctActualStart={correctActualStart}
         resetRace={resetRace}
         pushToast={pushToast}
+        maxRunnersPerTeam={(event as any)?.maxRunnersPerTeam ?? 10}
+        onSetMaxRunnersPerTeam={async (value: number) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setMaxRunnersPerTeamMutation({ eventId: event._id, value })
+        }}
       />
       {/* Toast notifications */}
       <div className="toast-stack">

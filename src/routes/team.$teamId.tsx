@@ -379,6 +379,7 @@ function TeamPage() {
             onContinue={() => setActiveTab('planning')}
             minLapSec={(event as any)?.minLapSec ?? 165}
             maxLapSec={(event as any)?.maxLapSec ?? 480}
+            maxRunnersPerTeam={(event as any)?.maxRunnersPerTeam ?? 10}
           />
         )}
         {activeTab === 'planning' && (

@@ -17,7 +17,8 @@ interface AdminState {
 interface TeamInfo {
   id: string
   name: string
-  maxRunners: number
+  // DEPRECATED per-team capacity (event.maxRunnersPerTeam is source of truth)
+  maxRunners?: number
   pin: string
   category: string
   goalLaps: number
@@ -49,6 +50,9 @@ interface AdminScreenProps {
   correctActualStart: (isoString: string) => void
   resetRace: () => void
   pushToast: (text: string, icon?: string) => void
+  // Event-level "max runners per team" (uniform across all teams). Default 10.
+  maxRunnersPerTeam?: number
+  onSetMaxRunnersPerTeam?: (value: number) => Promise<void> | void
 }
 
 export function AdminScreen({
@@ -64,8 +68,11 @@ export function AdminScreen({
   correctActualStart,
   resetRace,
   pushToast,
+  maxRunnersPerTeam,
+  onSetMaxRunnersPerTeam,
 }: AdminScreenProps) {
   const navigate = useNavigate()
+  const evMaxRunners = maxRunnersPerTeam ?? 10
   const schedule = admin.schedule || { startISO: '', endISO: '' }
   const race = admin.race || { started: false, startTime: null }
   const interruptions = Array.isArray(admin.interruptions) ? admin.interruptions : []
@@ -605,6 +612,36 @@ export function AdminScreen({
                   165..480s · course
                 </button>
               </div>
+              <hr className="sep" style={{ margin: '4px 0' }} />
+              <div className="hint">
+                Nombre max de coureurs par équipe (uniforme pour toutes les équipes de l'event). Les coureurs en abandon ne comptent pas.
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                <div className="field" style={{ maxWidth: 220 }}>
+                  <span className="field-label">Max coureurs / équipe</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    className="mono"
+                    defaultValue={evMaxRunners}
+                    onBlur={async (e) => {
+                      const v = Math.max(1, Math.min(50, +e.target.value || 1))
+                      if (v === evMaxRunners) return
+                      try {
+                        await onSetMaxRunnersPerTeam?.(v)
+                        pushToast(`Max coureurs/équipe → ${v}`, 'Check')
+                      } catch (err: any) {
+                        // ConvexError data carries human-readable .message; fallback to native message string
+                        const msg = err?.data?.message || err?.message || 'Erreur capacité'
+                        pushToast(msg, 'AlertTriangle')
+                        e.target.value = String(evMaxRunners)
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -787,7 +824,7 @@ export function AdminScreen({
                       🗑
                     </button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                     <div className="field">
                       <span className="field-label">Catégorie</span>
                       <select value={t.info.category || 'Mixte'} onChange={e => updateTeamInfo(t.info.id, { category: e.target.value })}>
@@ -795,17 +832,6 @@ export function AdminScreen({
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
-                    </div>
-                    <div className="field">
-                      <span className="field-label">Max coureurs</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="30"
-                        className="mono"
-                        value={t.info.maxRunners || 6}
-                        onChange={e => updateTeamInfo(t.info.id, { maxRunners: Math.max(1, +e.target.value || 1) })}
-                      />
                     </div>
                     <div className="field">
                       <span className="field-label">Objectif tours (auto)</span>
@@ -931,7 +957,7 @@ export function AdminScreen({
                     </div>
                   </div>
                   <div className="hint" style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    <span>{(t.runners || []).length} / {t.info.maxRunners || 6} coureur(s)</span>
+                    <span>{((t.runners || []).filter((r: any) => r.status !== 'out')).length} / {evMaxRunners} actifs</span>
                     <span>{(t.laps || []).length} tour(s) validés</span>
                     {t.info.contactName && (
                       <span>

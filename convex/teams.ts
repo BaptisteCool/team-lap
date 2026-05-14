@@ -227,14 +227,15 @@ export const deleteRunner = mutation({
   },
 })
 
-// Create a new team
+// Create a new team. maxRunners arg is deprecated (event.maxRunnersPerTeam is source of truth)
+// but accepted for backward compatibility with legacy callers.
 export const createTeam = mutation({
   args: {
     eventId: v.id('events'),
     name: v.string(),
     category: v.string(),
     color: v.string(),
-    maxRunners: v.number(),
+    maxRunners: v.optional(v.number()),
     goalLaps: v.number(),
     pin: v.string(),
   },
@@ -253,6 +254,18 @@ export const createTeam = mutation({
       updatedAt: Date.now(),
     })
     return teamId
+  },
+})
+
+// Helper: resolve max runners for a team via its parent event. Fallback DEFAULT_MAX_RUNNERS_PER_TEAM (10).
+export const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
+export const getMaxRunnersForTeam = query({
+  args: { teamId: v.id('teams') },
+  handler: async (ctx, args) => {
+    const team = await ctx.db.get(args.teamId)
+    if (!team) return DEFAULT_MAX_RUNNERS_PER_TEAM
+    const event = await ctx.db.get(team.eventId)
+    return event?.maxRunnersPerTeam ?? DEFAULT_MAX_RUNNERS_PER_TEAM
   },
 })
 
