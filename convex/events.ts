@@ -121,13 +121,14 @@ export const correctActualStart = mutation({
 export const resetRace = mutation({
   args: { eventId: v.id('events') },
   handler: async (ctx, args) => {
-    // Reset event
+    // Reset event — clear actualStart + actualEnd + back to 'scheduled'
     await ctx.db.patch(args.eventId, {
       status: 'scheduled',
       actualStart: undefined,
+      actualEnd: undefined,
       updatedAt: Date.now(),
     })
-    // Delete all laps for teams of this event
+    // Delete all laps for teams + clear team race state (currentIdx, ready, finished, autoPaused, cooldown, group queue)
     const teams = await ctx.db
       .query('teams')
       .withIndex('by_event', (q) => q.eq('eventId', args.eventId))
@@ -138,7 +139,16 @@ export const resetRace = mutation({
         .withIndex('by_team', (q) => q.eq('teamId', team._id))
         .collect()
       for (const lap of laps) await ctx.db.delete(lap._id)
-      await ctx.db.patch(team._id, { currentIdx: 0, ready: false, updatedAt: Date.now() })
+      await ctx.db.patch(team._id, {
+        currentIdx: 0,
+        ready: false,
+        finishedAt: undefined,
+        finishedByLap: undefined,
+        autoPaused: undefined,
+        cronCooldownUntil: undefined,
+        groupModeQueue: undefined,
+        updatedAt: Date.now(),
+      })
     }
     // Delete all interruptions for this event
     const interruptions = await ctx.db
