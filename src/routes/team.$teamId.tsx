@@ -7,6 +7,7 @@ import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
 import { useAction, useMutation, useQuery } from '../convex/hooks'
 import { WeatherSourceDialog } from '../components/WeatherSourceDialog'
+import { TestModeBadge } from '../components/TestModeBadge'
 import {
   DEFAULT_PROVIDER as WEATHER_DEFAULT_PROVIDER,
   PROVIDERS as WEATHER_PROVIDERS,
@@ -347,6 +348,7 @@ function TeamPage() {
 
   return (
     <div className={`page ${readonly ? 'is-readonly' : ''}`}>
+      <TestModeBadge testMode={(event as any)?.testMode} />
       <div className="grid" style={{ gap: 14, maxWidth: 1280, margin: '0 auto' }}>
         <div className="card" style={{ padding: '8px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

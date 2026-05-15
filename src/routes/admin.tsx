@@ -44,6 +44,7 @@ function AdminPage() {
   const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
   const setLatLngMutation = useMutation('events:setLatLng' as any)
   const setRelayTransitionSecMutation = useMutation('events:setRelayTransitionSec' as any)
+  const setTestModeMutation = useMutation('events:setTestMode' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
   const endItrMutation = useMutation('events:endInterruption' as any)
   const updateItrMutation = useMutation('events:updateInterruption' as any)
@@ -385,6 +386,26 @@ function AdminPage() {
           if (!event?._id) throw new Error('Événement non chargé')
           await setRelayTransitionSecMutation({ eventId: event._id, seconds })
         }}
+        testMode={(event as any)?.testMode ?? false}
+        onSetTestMode={async (value: boolean) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setTestModeMutation({ eventId: event._id, value })
+        }}
+        testModeLocked={(() => {
+          const ev = event as any
+          if (!ev) return false
+          if (ev.status !== 'scheduled') return true
+          if (ev.scheduledStart && ev.scheduledStart - Date.now() < 10 * 60 * 1000) return true
+          return false
+        })()}
+        testModeLockReason={(() => {
+          const ev = event as any
+          if (!ev) return undefined
+          if (ev.status !== 'scheduled') return 'Course démarrée ou terminée'
+          if (ev.scheduledStart && ev.scheduledStart - Date.now() < 10 * 60 * 1000)
+            return 'Départ dans moins de 10 min'
+          return undefined
+        })()}
       />
       {/* Toast notifications */}
       <div className="toast-stack">

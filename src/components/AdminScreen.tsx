@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { TestModeBadge } from './TestModeBadge';
 import {
   SUPER_ADMIN_PIN,
   TEAM_CATEGORIES,
@@ -61,6 +62,12 @@ interface AdminScreenProps {
   // Relay transition penalty (seconds). Default 7. Range 0-60.
   relayTransitionSec?: number
   onSetRelayTransitionSec?: (seconds: number) => Promise<void> | void
+  // Test mode (fast timings for QA)
+  testMode?: boolean
+  onSetTestMode?: (value: boolean) => Promise<void> | void
+  // Lock state pour le toggle (true = verrouillé, ex: course démarrée ou < 10min avant départ)
+  testModeLocked?: boolean
+  testModeLockReason?: string
 }
 
 export function AdminScreen({
@@ -84,6 +91,10 @@ export function AdminScreen({
   onSetLatLng,
   relayTransitionSec,
   onSetRelayTransitionSec,
+  testMode,
+  onSetTestMode,
+  testModeLocked,
+  testModeLockReason,
 }: AdminScreenProps) {
   const evRelayTransition = relayTransitionSec ?? 5
   const navigate = useNavigate()
@@ -188,6 +199,7 @@ export function AdminScreen({
 
   return (
     <div className="page">
+      <TestModeBadge testMode={testMode} />
       <div className="grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: 18 }}>
         {/* LEFT — Schedule + control + interruptions */}
         <div className="grid" style={{ gap: 18, alignContent: 'start' }}>
@@ -680,6 +692,59 @@ export function AdminScreen({
                     style={{ textAlign: 'center' }}
                   />
                 </div>
+              </div>
+              <hr className="sep" style={{ margin: '4px 0' }} />
+              <div className="hint">
+                Mode test : active des timings raccourcis (5s minLap, 30s maxLap, 3s replaceAuto, 2s relayTransition) pour tester la logique cron auto-pass + relai en quelques secondes. Verrouillé une fois la course démarrée ou à moins de 10 min du départ.
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: testModeLocked ? 'not-allowed' : 'pointer',
+                    opacity: testModeLocked ? 0.5 : 1,
+                  }}
+                  title={testModeLocked ? testModeLockReason || 'Verrouillé' : 'Activer/désactiver le mode test'}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!testMode}
+                    disabled={testModeLocked}
+                    onChange={async (e) => {
+                      const next = e.target.checked
+                      try {
+                        await onSetTestMode?.(next)
+                        pushToast(next ? 'Mode test activé ⚠' : 'Mode test désactivé', 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                        e.target.checked = !next
+                      }
+                    }}
+                  />
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Mode test (timings raccourcis)</span>
+                  {testMode && (
+                    <span
+                      className="badge"
+                      style={{
+                        fontSize: 10,
+                        padding: '2px 6px',
+                        background: 'oklch(0.72 0.21 25 / 0.18)',
+                        color: 'oklch(0.85 0.18 25)',
+                        border: '1px solid oklch(0.72 0.21 25 / 0.5)',
+                      }}
+                    >
+                      ACTIF
+                    </span>
+                  )}
+                </label>
+                {testModeLocked && (
+                  <span className="hint" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    🔒 {testModeLockReason}
+                  </span>
+                )}
               </div>
               <hr className="sep" style={{ margin: '4px 0' }} />
               <div className="hint">

@@ -1,5 +1,6 @@
 import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import { TEST_MODE_LOCK_WINDOW_MS } from './lib/timings'
 
 // List all events
 export const list = query({
@@ -177,6 +178,30 @@ export const updateReplaceAutoWindow = mutation({
 // Default value when event has no explicit setting.
 export const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
 export const DEFAULT_RELAY_TRANSITION_SEC = 5
+
+// Toggle test mode (fast timings for cron/auto-pass dev). Locked once race started
+// or scheduled start within TEST_MODE_LOCK_WINDOW_MS (10 min).
+export const setTestMode = mutation({
+  args: { eventId: v.id('events'), value: v.boolean() },
+  handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.eventId)
+    if (!event) throw new ConvexError({ code: 'EVENT_NOT_FOUND', message: 'Événement introuvable.' })
+    if (event.status !== 'scheduled') {
+      throw new ConvexError({
+        code: 'TEST_MODE_LOCKED_RACE_STARTED',
+        message: 'Mode test verrouillé : la course est déjà démarrée ou terminée.',
+      })
+    }
+    if (event.scheduledStart && event.scheduledStart - Date.now() < TEST_MODE_LOCK_WINDOW_MS) {
+      throw new ConvexError({
+        code: 'TEST_MODE_LOCKED_NEAR_START',
+        message: 'Mode test verrouillé : la course démarre dans moins de 10 minutes.',
+      })
+    }
+    await ctx.db.patch(args.eventId, { testMode: args.value, updatedAt: Date.now() })
+    return args.value
+  },
+})
 
 // Set the relay transition penalty in seconds (used for delta calculations + future auto-pass).
 export const setRelayTransitionSec = mutation({

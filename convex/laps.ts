@@ -1,6 +1,7 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import { computeNextRunnerIdx, consumeQueueOnRelay, type GroupModeEntry } from './lib/nextRunner'
+import { getEffectiveTimings } from './lib/timings'
 
 // Min interval between two laps for the same team (debounce)
 const MIN_LAP_GAP_MS = 5000
@@ -49,14 +50,15 @@ export const recordLap = mutation({
     const now = Date.now()
     const team = await ctx.db.get(args.teamId)
     const event = team ? await ctx.db.get(team.eventId) : null
-    const windowMs = ((event?.replaceAutoWindowSec ?? DEFAULT_REPLACE_AUTO_WINDOW_SEC) as number) * 1000
+    const t = getEffectiveTimings(event)
+    const windowMs = t.replaceAutoWindowSec * 1000
     const allTeamLaps = await ctx.db
       .query('laps')
       .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
       .collect()
     const sortedDesc = allTeamLaps.sort((a: any, b: any) => b.timestamp - a.timestamp)
     const lastLap = sortedDesc[0] || null
-    const minLapMs = ((event?.minLapSec ?? 165) as number) * 1000
+    const minLapMs = t.minLapSec * 1000
     const isAutoLast = lastLap && (lastLap.type === 'checkpoint_auto' || lastLap.type === 'relay_auto')
     const isRelayLast = lastLap && (lastLap.type === 'relay_auto' || lastLap.type === 'relay_manual')
     // Replace only if the auto fired VERY recently (race condition window MIN_LAP_GAP_MS = 5s).
@@ -108,7 +110,7 @@ export const recordLap = mutation({
 
     // Resume cron auto-tick after a manual action + arm a cooldown so the cron stays out
     // for the admin-configured window (replaceAutoWindowSec).
-    const cooldownMs = ((event?.replaceAutoWindowSec ?? DEFAULT_REPLACE_AUTO_WINDOW_SEC) as number) * 1000
+    const cooldownMs = t.replaceAutoWindowSec * 1000
     await ctx.db.patch(args.teamId, {
       autoPaused: false,
       cronCooldownUntil: now + cooldownMs,
@@ -116,11 +118,11 @@ export const recordLap = mutation({
     })
 
     // Server-side auto-calibration: update runner.liveKm from the manual lap time.
-    // Use admin-configured lap time bounds so test mode (short laps) calibrates too.
+    // Use effective lap time bounds so test mode (short laps) calibrates too.
     if (result && args.runnerId) {
       const lapTime = (result as any).lapTime as number
-      const minLapMs = ((event?.minLapSec ?? 165) as number) * 1000
-      const maxLapMs = ((event?.maxLapSec ?? 480) as number) * 1000
+      const minLapMs = t.minLapSec * 1000
+      const maxLapMs = t.maxLapSec * 1000
       if (lapTime >= minLapMs && lapTime <= maxLapMs) {
         const lapDistanceM = 900
         const secPerKm = (lapTime / 1000) * (1000 / lapDistanceM)
@@ -249,9 +251,10 @@ async function decideAutoLap(
   if (elapsed < MIN_LAP_GAP_MS) throw new Error(`decide:debounce elapsed=${elapsed}<${MIN_LAP_GAP_MS}`)
 
   // Expected lap duration (live pace > pace estim).
-  // Use admin lap-time bounds to validate live pace (test mode supports very short laps).
-  const minLapMs = (((event?.minLapSec ?? 165) as number) * 1000)
-  const maxLapMs = (((event?.maxLapSec ?? 480) as number) * 1000)
+  // Use effective lap-time bounds (test mode supports very short laps).
+  const tDecide = getEffectiveTimings(event)
+  const minLapMs = tDecide.minLapSec * 1000
+  const maxLapMs = tDecide.maxLapSec * 1000
   const lapDistanceM = 900
   const liveLapMs = (runner.liveKmMin != null && runner.liveKmSec != null)
     ? Math.round(((runner.liveKmMin * 60 + runner.liveKmSec) * lapDistanceM) / 1000) * 1000
@@ -269,8 +272,7 @@ async function decideAutoLap(
   const prevLapForOffset = lastLap as any
   const prevWasRelay =
     prevLapForOffset && (prevLapForOffset.type === 'relay_manual' || prevLapForOffset.type === 'relay_auto')
-  const relayTransitionSec = (event as any)?.relayTransitionSec ?? 5
-  const offsetMs = prevWasRelay ? relayTransitionSec * 1000 : 0
+  const offsetMs = prevWasRelay ? tDecide.relayTransitionSec * 1000 : 0
   const expectedLapMs = baseExpectedLapMs + offsetMs
 
   // Tolerance: only auto-trigger when expected time is reached or slightly past
@@ -371,9 +373,9 @@ async function applyLap(
     .sort((a: any, b: any) => b.timestamp - a.timestamp)[0]
   const prevWasRelay = prevTeamLap && (prevTeamLap.type === 'relay_manual' || prevTeamLap.type === 'relay_auto')
   const eventForFlag = await ctx.db.get(team.eventId)
-  const relayTransitionSec = (eventForFlag as any)?.relayTransitionSec ?? 5
+  const tApply = getEffectiveTimings(eventForFlag)
   const isFirstAfterRelay = prevWasRelay ? true : undefined
-  const relayTransitionMsApplied = prevWasRelay ? relayTransitionSec * 1000 : undefined
+  const relayTransitionMsApplied = prevWasRelay ? tApply.relayTransitionSec * 1000 : undefined
 
   const docId = await ctx.db.insert('laps', {
     teamId,
@@ -613,7 +615,8 @@ export const deleteLap = mutation({
     // Arm cron cooldown so cron doesn't immediately re-fire after undo (gives user time to redo manually)
     const team = await ctx.db.get(lap.teamId)
     const event = team ? await ctx.db.get(team.eventId) : null
-    const cooldownMs = ((event?.replaceAutoWindowSec ?? 180) as number) * 1000
+    const tUndo = getEffectiveTimings(event)
+    const cooldownMs = tUndo.replaceAutoWindowSec * 1000
     await ctx.db.patch(lap.teamId, { cronCooldownUntil: now + cooldownMs })
 
     // Restore team.currentIdx + groupModeQueue using the snapshot taken at insert time (most accurate)
