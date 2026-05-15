@@ -76,6 +76,39 @@ export const getTeam = query({
   },
 })
 
+// Mark this team as finished (manual click by captain after scheduledEnd).
+// Idempotent + guards: refused before scheduledEnd; refused if event missing.
+export const recordFinish = mutation({
+  args: { teamId: v.id('teams') },
+  handler: async (ctx, args) => {
+    const team = await ctx.db.get(args.teamId)
+    if (!team) throw new ConvexError({ code: 'TEAM_NOT_FOUND', message: 'Équipe introuvable.' })
+    if ((team as any).finishedAt) return (team as any).finishedAt // idempotent
+    const event = await ctx.db.get(team.eventId)
+    if (!event?.scheduledEnd) {
+      throw new ConvexError({
+        code: 'NO_SCHEDULED_END',
+        message: "Heure de fin non définie. L'admin doit la configurer.",
+      })
+    }
+    if (Date.now() < event.scheduledEnd) {
+      throw new ConvexError({
+        code: 'RACE_NOT_OVER_YET',
+        message: "L'heure de fin de course n'est pas encore atteinte.",
+      })
+    }
+    // Snapshot lap count (real laps only — exclude type='position')
+    const laps = await ctx.db
+      .query('laps')
+      .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
+      .collect()
+    const finishedByLap = laps.filter((l: any) => l.type !== 'position').length
+    const finishedAt = Date.now()
+    await ctx.db.patch(args.teamId, { finishedAt, finishedByLap, updatedAt: finishedAt })
+    return finishedAt
+  },
+})
+
 // Pause / resume cron auto-laps for a team
 export const setAutoPaused = mutation({
   args: { teamId: v.id('teams'), paused: v.boolean() },

@@ -89,6 +89,25 @@ export const stopRace = mutation({
   },
 })
 
+// Permanently end the event (admin "Arrêter l'événement"). Sets actualEnd + status='finished'.
+// Per CTO #13: NO cascade on teams — captains must still record finish per team
+// (sportive rule: tour entamé compte). Idempotent.
+export const endRace = mutation({
+  args: { eventId: v.id('events') },
+  handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.eventId)
+    if (!event) throw new ConvexError({ code: 'EVENT_NOT_FOUND', message: 'Événement introuvable.' })
+    if ((event as any).actualEnd) return (event as any).actualEnd // idempotent
+    const actualEnd = Date.now()
+    await ctx.db.patch(args.eventId, {
+      status: 'finished',
+      actualEnd,
+      updatedAt: actualEnd,
+    })
+    return actualEnd
+  },
+})
+
 export const correctActualStart = mutation({
   args: { eventId: v.id('events'), actualStart: v.number() },
   handler: async (ctx, args) => {

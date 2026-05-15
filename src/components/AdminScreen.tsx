@@ -68,6 +68,9 @@ interface AdminScreenProps {
   // Lock state pour le toggle (true = verrouillé, ex: course démarrée ou < 10min avant départ)
   testModeLocked?: boolean
   testModeLockReason?: string
+  // End race (admin) — sets event.actualEnd + status='finished'
+  actualEnd?: number | null
+  onEndRace?: () => Promise<void> | void
 }
 
 export function AdminScreen({
@@ -95,6 +98,8 @@ export function AdminScreen({
   onSetTestMode,
   testModeLocked,
   testModeLockReason,
+  actualEnd,
+  onEndRace,
 }: AdminScreenProps) {
   const evRelayTransition = relayTransitionSec ?? 5
   const navigate = useNavigate()
@@ -271,6 +276,38 @@ export function AdminScreen({
                     <button className="btn danger" onClick={stopRace}>
                       ⏹ Stopper
                     </button>
+                  )}
+                  {race.started && !actualEnd && onEndRace && (
+                    <button
+                      className="btn danger"
+                      onClick={async () => {
+                        if (!window.confirm("Arrêter définitivement l'événement ?\n\nLes équipes pas encore terminées garderont la possibilité de cliquer 'Fin de course' pour leur tour entamé. Action irréversible.")) return
+                        try {
+                          await onEndRace()
+                          pushToast(`🏁 Événement arrêté à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Paris' })}`, 'Flag')
+                        } catch (err: any) {
+                          const msg = err?.data?.message || err?.message || 'Erreur'
+                          pushToast(msg, 'AlertTriangle')
+                        }
+                      }}
+                      title="Marque l'event terminé (status=finished, actualEnd=now). Cron auto-pass arrêté."
+                    >
+                      🏁 Arrêter l'événement
+                    </button>
+                  )}
+                  {actualEnd && (
+                    <span
+                      className="badge"
+                      style={{
+                        padding: '6px 10px',
+                        background: 'oklch(0.86 0.20 135 / 0.18)',
+                        color: 'oklch(0.92 0.20 135)',
+                        border: '1px solid oklch(0.86 0.20 135 / 0.5)',
+                        fontSize: 13,
+                      }}
+                    >
+                      🏁 Terminé à {new Date(actualEnd).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Paris' })}
+                    </span>
                   )}
                   {(race.startTime || totalLaps > 0) && resetRace && (
                     <button className="btn ghost" onClick={resetRace} title="Effacer le départ, les tours et les interruptions">

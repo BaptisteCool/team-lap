@@ -135,11 +135,17 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
       }
       // Freeze marker just before line when team's cron is paused (runner stopped)
       if (t.autoPaused) progress = 0.92
+      // Team finished → marker frozen on line (sportive end)
+      if ((t as any).finishedAt) progress = 1
       return {
         id: t._id,
         color: t.color || TEAM_COLOR_PALETTE[0],
         progress,
-        label: inHandoverWindow ? `${t.name || ''} · 🤝 ${handoverRemainingSec}s` : (t.name || ''),
+        label: (t as any).finishedAt
+          ? `${t.name || ''} · 🏁`
+          : inHandoverWindow
+            ? `${t.name || ''} · 🤝 ${handoverRemainingSec}s`
+            : (t.name || ''),
       }
     })
 
