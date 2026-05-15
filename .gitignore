@@ -63,3 +63,8 @@ Thumbs.db
 # Vite
 .vite
 .vercel
+
+# Claude Code session state (per-session locks/cache)
+.claude/scheduled_tasks.lock
+.claude/cache/
+
