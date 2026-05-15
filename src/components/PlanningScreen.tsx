@@ -651,11 +651,16 @@ export function PlanningScreen({
               </div>
               <div className="grid" style={{ gap: 6 }}>
                 {(() => {
-                  // Anchor for ETA projection: race-running → use live clock, else scheduled, else now
+                  // Anchor for ETA projection (#16):
+                  // - race running (actualStart set) → live clock now
+                  // - scheduled but not started → scheduledStart, but never in the past
+                  //   (if scheduledStart already passed without top départ, fallback to now)
+                  // - no scheduledStart at all → now
                   const now = Date.now()
+                  const scheduledMs = schedule?.startISO ? new Date(schedule.startISO).getTime() : null
                   const startMs = raceStartTime
                     ? now
-                    : (schedule?.startISO ? new Date(schedule.startISO).getTime() : now)
+                    : (scheduledMs ? Math.max(scheduledMs, now) : now)
                   let cum = 0
                   let firstCurrentSeen = false
                   // Walk full expandedSequence to compute proper cumulative ETAs, then filter for display
