@@ -65,6 +65,11 @@ export default defineSchema({
     // time when a tour is type relay_*, both for cumulative team delta computation
     // and (later) for auto-pass scheduling penalty.
     relayTransitionSec: v.optional(v.number()),
+
+    // Test mode: when true, runtime timings (minLapSec/maxLapSec/replaceAutoWindowSec/
+    // relayTransitionSec) are overridden by TEST_TIMINGS constants for fast-iteration
+    // testing. Locked once race < 10 min from start or status != 'scheduled'.
+    testMode: v.optional(v.boolean()),
     
     createdAt: v.number(),
     updatedAt: v.number(),

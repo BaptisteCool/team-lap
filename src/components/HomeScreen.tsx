@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '../convex/hooks'
 import { fmtClock, fmtKmPace, kmPaceToLapMs, LAP_DISTANCE_M, TEAM_COLOR_PALETTE } from '../lib/race-data'
 import { GpxMap } from './GpxMap'
+import { TestModeBadge } from './TestModeBadge'
 
 interface Runner {
   id: string
@@ -144,6 +145,7 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
 
   return (
     <div className="page">
+      <TestModeBadge testMode={(event as any)?.testMode} />
       <div className="grid" style={{ gap: 18, maxWidth: 980, margin: '0 auto' }}>
         {/* Carte circuit en haut */}
         <div className="card">
