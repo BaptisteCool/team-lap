@@ -30,19 +30,17 @@ export const Route = createRootRoute({
       <div className="app">
         <header className="topbar">
           <div className="brand" style={{ cursor: 'pointer' }}>
-            <Link to="/">
-              <div className="brand-mark" aria-label="TeamLap">
-                <svg width="22" height="22" viewBox="0 0 200 200" fill="none" aria-hidden="true">
-                  <circle cx="100" cy="110" r="60" stroke="currentColor" strokeWidth="22" fill="none"
-                          strokeDasharray="305 60" strokeDashoffset="-30" strokeLinecap="round"
-                          transform="rotate(-90 100 110)" />
-                  <rect x="58" y="32" width="84" height="20" rx="10" fill="currentColor" />
-                  <rect x="92" y="18" width="16" height="28" rx="4" fill="currentColor" />
-                </svg>
-              </div>
+            <Link to="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none', color: 'inherit' }}>
+              <img
+                src="/images/icon.png"
+                alt="TeamLap"
+                width={36}
+                height={36}
+                style={{ borderRadius: 8, flexShrink: 0, display: 'block' }}
+              />
               <div>
                 <div className="brand-name">TeamLap</div>
-                <div className="brand-sub">24h de course à pied 2026</div>
+                <div className="brand-sub">Relais 24h</div>
               </div>
             </Link>
           </div>
