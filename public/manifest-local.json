@@ -1,0 +1,17 @@
+{
+  "name": "[LOCAL] TeamLap · Relais 24h",
+  "short_name": "[LOCAL] TeamLap",
+  "description": "Gestion live d'une course relais 24h — env LOCAL.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0e0c",
+  "theme_color": "#9580FF",
+  "lang": "fr",
+  "icons": [
+    { "src": "/images/icon.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
+    { "src": "/images/apple-icon.png", "sizes": "180x180", "type": "image/png", "purpose": "any" },
+    { "src": "/images/icon-TL-1024.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

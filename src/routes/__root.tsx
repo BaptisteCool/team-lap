@@ -2,11 +2,49 @@ import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '../convex/hooks'
 import { fmtClock } from '../lib/utils'
+import { UpdateBanner } from '../components/UpdateBanner'
 
 const EVENT_SLUG = '24h-brette-les-pins-2026'
 
+// Env detection from hostname — distingue localhost / preview Vercel / prod
+function detectEnv(): { label: string; tag: string | null; color: string } {
+  if (typeof window === 'undefined') return { label: 'TeamLap', tag: null, color: 'inherit' }
+  const h = window.location.hostname
+  if (h === 'localhost' || h === '127.0.0.1' || h.endsWith('.local')) {
+    return { label: 'TeamLap', tag: 'LOCAL', color: 'oklch(0.65 0.18 270)' }
+  }
+  // Vercel preview deploys: *-baptiste-cools-projects.vercel.app (any subdomain except prod alias)
+  if (h.includes('vercel.app')) {
+    return { label: 'TeamLap', tag: 'PREVIEW', color: 'oklch(0.82 0.17 70)' }
+  }
+  return { label: 'TeamLap', tag: null, color: 'inherit' }
+}
+
 export const Route = createRootRoute({
   component: () => {
+    const env = detectEnv()
+    // Update document title with env tag (visible in tab + history)
+    useEffect(() => {
+      document.title = env.tag ? `[${env.tag}] TeamLap · Relais 24h` : 'TeamLap · Relais 24h'
+    }, [env.tag])
+    // PWA manifest swap per env via static files (Blob URL casse install browsers).
+    // Pré-requis: public/manifest-local.json + public/manifest-preview.json doivent exister.
+    useEffect(() => {
+      if (!env.tag) return // prod = use static /manifest.json
+      const link = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null
+      if (!link) return
+      const prevHref = link.href
+      link.href = env.tag === 'LOCAL' ? '/manifest-local.json' : '/manifest-preview.json'
+      // Update theme-color meta pour distinguer install
+      const themeMeta = document.querySelector('meta[name="theme-color"]') as HTMLMetaElement | null
+      const prevTheme = themeMeta?.content
+      const themeColor = env.tag === 'LOCAL' ? '#9580FF' : '#F0C040'
+      if (themeMeta) themeMeta.content = themeColor
+      return () => {
+        if (link && prevHref) link.href = prevHref
+        if (themeMeta && prevTheme) themeMeta.content = prevTheme
+      }
+    }, [env.tag])
     const event = useQuery('events:getBySlug' as any, { slug: EVENT_SLUG }) as any
     const [now, setNow] = useState(Date.now())
     useEffect(() => {
@@ -51,7 +89,24 @@ export const Route = createRootRoute({
                 style={{ borderRadius: 8, flexShrink: 0, display: 'block' }}
               />
               <div className="brand-text">
-                <div className="brand-name">TeamLap</div>
+                <div className="brand-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  TeamLap
+                  {env.tag && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        borderRadius: 4,
+                        color: env.color,
+                        border: `1px solid ${env.color}`,
+                        fontWeight: 700,
+                        letterSpacing: '0.5px',
+                      }}
+                    >
+                      {env.tag}
+                    </span>
+                  )}
+                </div>
                 <div className="brand-sub">Relais 24h</div>
               </div>
             </Link>
@@ -97,6 +152,7 @@ export const Route = createRootRoute({
         <main>
           <Outlet />
         </main>
+        <UpdateBanner />
       </div>
     )
   },
