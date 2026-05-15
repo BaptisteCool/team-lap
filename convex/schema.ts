@@ -127,6 +127,11 @@ export default defineSchema({
     finishedAt: v.optional(v.number()),
     finishedByLap: v.optional(v.number()), // snapshot lap count at finish
 
+    // Theoretical cycle time snapshot at race start (#17): sum(kmPaceToLapMs * plannedLaps)
+    // Captured by startRaceNow / startRaceAtScheduled. Cleared by resetRace.
+    // Used as fixed reference vs the live "affiné" cycle in Planning.
+    theoreticalCycleMs: v.optional(v.number()),
+
     // Group-relay mode queue — head = active/pending entry; rest = upcoming entries
     groupModeQueue: v.optional(v.array(v.object({
       groupName: v.string(),

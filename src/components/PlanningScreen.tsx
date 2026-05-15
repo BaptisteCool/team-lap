@@ -53,6 +53,8 @@ interface PlanningScreenProps {
   onOpenWeatherDialog?: () => void
   weatherProviderLabel?: string
   weatherCityName?: string | null
+  // Théorique cycle ms snapshotté au top départ (#17). null avant départ.
+  theoreticalCycleMs?: number | null
 }
 
 export function PlanningScreen({
@@ -78,6 +80,7 @@ export function PlanningScreen({
   onOpenWeatherDialog,
   weatherProviderLabel,
   weatherCityName,
+  theoreticalCycleMs,
 }: PlanningScreenProps) {
   // Helper: pick hourly index closest to a target ms epoch.
   function weatherIndexForTime(target: number): number | null {
@@ -582,6 +585,28 @@ export function PlanningScreen({
                 <div className="stat">
                   <div className="stat-label">Cycle ({expandedSequence.length} t.)</div>
                   <div className="stat-value mono">{totalMs ? fmtLap(totalMs) : '—'}</div>
+                  {theoreticalCycleMs && theoreticalCycleMs > 0 && (
+                    (() => {
+                      const delta = (totalMs || 0) - theoreticalCycleMs
+                      const absMs = Math.abs(delta)
+                      const sign = delta < 0 ? '-' : '+'
+                      const min = Math.floor(absMs / 60000)
+                      const sec = Math.floor((absMs % 60000) / 1000)
+                      const tone = absMs <= 5 * 60 * 1000
+                        ? 'var(--muted)'
+                        : (delta < 0 ? 'oklch(0.86 0.20 135)' : 'oklch(0.72 0.21 25)')
+                      return (
+                        <div className="hint" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span title="Cycle théorique snapshotté au top départ">
+                            Théorique : {fmtLap(theoreticalCycleMs)}
+                          </span>
+                          <span style={{ color: tone, fontWeight: 500 }} title="Delta cycle réel - théorique">
+                            Δ {sign}{min}:{String(sec).padStart(2, '0')}
+                          </span>
+                        </div>
+                      )
+                    })()
+                  )}
                 </div>
                 <div className="stat">
                   <div className="stat-label">Cycles / 24h</div>
