@@ -51,6 +51,11 @@ export default defineSchema({
 
     // Max runners per team (uniform across all teams of this event). Default 10.
     maxRunnersPerTeam: v.optional(v.number()),
+
+    // Geolocation for weather forecast lookup (Open-Meteo). Optional — UI hides
+    // weather widgets when missing. Validated client-side: -90..90 / -180..180.
+    latitude: v.optional(v.number()),
+    longitude: v.optional(v.number()),
     
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -209,6 +214,17 @@ export default defineSchema({
     .index('by_team_runner', ['teamId', 'runnerId'])
     .index('by_timestamp', ['timestamp'])
     .index('by_lap_id', ['id']),
+
+  // Weather cache (Open-Meteo hourly forecast per event). TTL ~1h.
+  weather_cache: defineTable({
+    eventId: v.id('events'),
+    fetchedAt: v.number(),
+    expiresAt: v.number(),
+    // Raw JSON payload: { time: number[] (ms epoch), temperature_2m: number[],
+    // relative_humidity_2m: number[], weather_code: number[], precipitation_probability: number[] }
+    data: v.any(),
+  })
+    .index('by_event', ['eventId']),
 
   // Rankings (computed and stored)
   rankings: defineTable({

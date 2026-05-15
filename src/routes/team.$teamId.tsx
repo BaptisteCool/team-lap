@@ -1,11 +1,11 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ContactScreen } from '../components/ContactScreen'
 import { HistoryScreen } from '../components/HistoryScreen'
 import { LiveScreen } from '../components/LiveScreen'
 import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
-import { useMutation, useQuery } from '../convex/hooks'
+import { useAction, useMutation, useQuery } from '../convex/hooks'
 import { DEFAULT_RUNNERS, estimateGoalLaps, RUNNER_PALETTE, TEAM_COLOR_PALETTE, emptyTeamSlice } from '../lib/race-data'
 
 const EVENT_SLUG = '24h-brette-les-pins-2026'
@@ -54,6 +54,19 @@ function TeamPage() {
   const upsertRunnerMutation = useMutation('teams:upsertRunner' as any)
   const deleteRunnerMutation = useMutation('teams:deleteRunner' as any)
   const setAutoPausedMutation = useMutation('teams:setAutoPaused' as any)
+  // Weather (Open-Meteo via Convex action). Reactive query + on-demand fetch.
+  const weather = useQuery('weather:getWeatherForEvent' as any, event?._id ? { eventId: event._id } : 'skip') as any
+  const fetchWeatherAction = useAction('weather:fetchWeather' as any)
+  // Trigger a refresh when cache is missing or stale (and we have lat/lng).
+  React.useEffect(() => {
+    if (!event?._id) return
+    if ((event as any)?.latitude == null || (event as any)?.longitude == null) return
+    // weather === undefined → still loading; null → no cache row yet; defined with .stale → expired
+    if (weather === undefined) return
+    if (weather === null || weather?.stale) {
+      fetchWeatherAction({ eventId: event._id }).catch((err: any) => console.warn('weather fetch failed', err))
+    }
+  }, [event?._id, (event as any)?.latitude, (event as any)?.longitude, weather === null, weather?.stale])
   const setRunnerGroupMutation = useMutation('teams:setRunnerGroup' as any)
   const enqueueGroupModeMutation = useMutation('teams:enqueueGroupMode' as any)
   const cancelGroupModeEntryMutation = useMutation('teams:cancelGroupModeEntry' as any)
@@ -431,6 +444,8 @@ function TeamPage() {
               const all = (lapsData || []).filter((l: any) => l.type !== 'position').slice().sort((a: any, b: any) => a.timestamp - b.timestamp)
               return all.length ? all[all.length - 1].timestamp : event.actualStart
             })()}
+            weatherForecast={weather?.data || null}
+            weatherUnavailable={null}
             groupModeQueue={(team as any).groupModeQueue}
             onSetRunnerGroup={(rid, group) => {
               if (readonly || !teamData?._id) return

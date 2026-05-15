@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react'
 import { kmPaceToLapMs, lapMsToKmPace } from '../lib/race-data'
 import { EnergyBar } from './EnergyBar'
 import { StatusChip } from './StatusChip'
+import { WeatherBadge } from './WeatherBadge'
+import { WeatherSummaryBanner, type HourlyForecast } from './WeatherSummaryBanner'
 
 interface Runner {
   id: string
@@ -44,6 +46,9 @@ interface PlanningScreenProps {
   onEnqueueGroupMode?: (groupName: string, remainingRelays: number) => void
   onCancelGroupModeEntry?: (index: number) => void
   onStopActiveGroupMode?: () => void
+  // Weather forecast (Open-Meteo). null/undefined → bandeau + badges masqués.
+  weatherForecast?: HourlyForecast | null
+  weatherUnavailable?: { reason: string } | null
 }
 
 export function PlanningScreen({
@@ -64,7 +69,25 @@ export function PlanningScreen({
   onEnqueueGroupMode,
   onCancelGroupModeEntry,
   onStopActiveGroupMode,
+  weatherForecast,
+  weatherUnavailable,
 }: PlanningScreenProps) {
+  // Helper: pick hourly index closest to a target ms epoch.
+  function weatherIndexForTime(target: number): number | null {
+    if (!weatherForecast?.time?.length) return null
+    let best = -1
+    let bestDelta = Infinity
+    for (let i = 0; i < weatherForecast.time.length; i++) {
+      const d = Math.abs(weatherForecast.time[i] - target)
+      if (d < bestDelta) {
+        bestDelta = d
+        best = i
+      }
+    }
+    // Don't show weather more than 2h away from any hourly slot
+    if (best < 0 || bestDelta > 2 * 60 * 60 * 1000) return null
+    return best
+  }
   const dragId = useRef<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
   const [editRunnerId, setEditRunnerId] = useState<string | null>(null)
@@ -573,6 +596,8 @@ export function PlanningScreen({
               <h3>Prochains passages</h3>
             </div>
             <div className="card-body">
+              {/* Weather summary (next 6h). Auto-hides if no forecast and no explicit unavailable reason. */}
+              <WeatherSummaryBanner forecast={weatherForecast} unavailable={weatherUnavailable} />
               {/* Filter on a runner — null = all */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                 <label className="hint" style={{ fontSize: 12 }}>Filtrer :</label>
@@ -761,6 +786,18 @@ export function PlanningScreen({
                         >
                           🕒 {eta.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Paris' })}
                         </span>
+                        {(() => {
+                          const idx = weatherIndexForTime(eta.getTime())
+                          if (idx == null || !weatherForecast) return null
+                          return (
+                            <WeatherBadge
+                              weatherCode={weatherForecast.weather_code[idx]}
+                              temperature={weatherForecast.temperature_2m[idx]}
+                              humidity={weatherForecast.relative_humidity_2m[idx]}
+                              precipitation={weatherForecast.precipitation_probability[idx]}
+                            />
+                          )
+                        })()}
                       </div>
                     )
                   })

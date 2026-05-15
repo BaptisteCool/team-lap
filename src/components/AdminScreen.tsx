@@ -53,6 +53,10 @@ interface AdminScreenProps {
   // Event-level "max runners per team" (uniform across all teams). Default 10.
   maxRunnersPerTeam?: number
   onSetMaxRunnersPerTeam?: (value: number) => Promise<void> | void
+  // Geo for weather (Open-Meteo)
+  latitude?: number | null
+  longitude?: number | null
+  onSetLatLng?: (lat: number | null, lng: number | null) => Promise<void> | void
 }
 
 export function AdminScreen({
@@ -70,6 +74,9 @@ export function AdminScreen({
   pushToast,
   maxRunnersPerTeam,
   onSetMaxRunnersPerTeam,
+  latitude,
+  longitude,
+  onSetLatLng,
 }: AdminScreenProps) {
   const navigate = useNavigate()
   const evMaxRunners = maxRunnersPerTeam ?? 10
@@ -636,6 +643,70 @@ export function AdminScreen({
                         const msg = err?.data?.message || err?.message || 'Erreur capacité'
                         pushToast(msg, 'AlertTriangle')
                         e.target.value = String(evMaxRunners)
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+              </div>
+              <hr className="sep" style={{ margin: '4px 0' }} />
+              <div className="hint">
+                Géolocalisation event (lat/lng). Active la météo horaire dans le planning des passages (Open-Meteo). Vide → météo masquée.
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="field" style={{ maxWidth: 180 }}>
+                  <span className="field-label">Latitude</span>
+                  <input
+                    type="number"
+                    step="any"
+                    min="-90"
+                    max="90"
+                    className="mono"
+                    defaultValue={latitude ?? ''}
+                    placeholder="47.7547"
+                    onBlur={async (e) => {
+                      const raw = e.target.value.trim()
+                      const lat = raw === '' ? null : Number(raw)
+                      if (lat !== null && (Number.isNaN(lat) || lat < -90 || lat > 90)) {
+                        pushToast('Latitude invalide (-90..90)', 'AlertTriangle')
+                        e.target.value = latitude != null ? String(latitude) : ''
+                        return
+                      }
+                      try {
+                        await onSetLatLng?.(lat, longitude ?? null)
+                        pushToast('Latitude enregistrée', 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+                <div className="field" style={{ maxWidth: 180 }}>
+                  <span className="field-label">Longitude</span>
+                  <input
+                    type="number"
+                    step="any"
+                    min="-180"
+                    max="180"
+                    className="mono"
+                    defaultValue={longitude ?? ''}
+                    placeholder="0.3247"
+                    onBlur={async (e) => {
+                      const raw = e.target.value.trim()
+                      const lng = raw === '' ? null : Number(raw)
+                      if (lng !== null && (Number.isNaN(lng) || lng < -180 || lng > 180)) {
+                        pushToast('Longitude invalide (-180..180)', 'AlertTriangle')
+                        e.target.value = longitude != null ? String(longitude) : ''
+                        return
+                      }
+                      try {
+                        await onSetLatLng?.(latitude ?? null, lng)
+                        pushToast('Longitude enregistrée', 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
                       }
                     }}
                     style={{ textAlign: 'center' }}
