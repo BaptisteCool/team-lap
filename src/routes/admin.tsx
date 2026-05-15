@@ -42,6 +42,7 @@ function AdminPage() {
   const updateReplaceAutoWindowMutation = useMutation('events:updateReplaceAutoWindow' as any)
   const updateLapBoundsMutation = useMutation('events:updateLapBounds' as any)
   const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
+  const setLatLngMutation = useMutation('events:setLatLng' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
   const endItrMutation = useMutation('events:endInterruption' as any)
   const updateItrMutation = useMutation('events:updateInterruption' as any)
@@ -365,6 +366,16 @@ function AdminPage() {
         onSetMaxRunnersPerTeam={async (value: number) => {
           if (!event?._id) throw new Error('Événement non chargé')
           await setMaxRunnersPerTeamMutation({ eventId: event._id, value })
+        }}
+        latitude={(event as any)?.latitude ?? null}
+        longitude={(event as any)?.longitude ?? null}
+        onSetLatLng={async (lat: number | null, lng: number | null) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setLatLngMutation({
+            eventId: event._id,
+            latitude: lat ?? undefined,
+            longitude: lng ?? undefined,
+          })
         }}
       />
       {/* Toast notifications */}
