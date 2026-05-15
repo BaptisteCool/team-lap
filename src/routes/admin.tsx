@@ -43,6 +43,7 @@ function AdminPage() {
   const updateLapBoundsMutation = useMutation('events:updateLapBounds' as any)
   const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
   const setLatLngMutation = useMutation('events:setLatLng' as any)
+  const setRelayTransitionSecMutation = useMutation('events:setRelayTransitionSec' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
   const endItrMutation = useMutation('events:endInterruption' as any)
   const updateItrMutation = useMutation('events:updateInterruption' as any)
@@ -378,6 +379,11 @@ function AdminPage() {
             longitude: lng ?? undefined,
             cityName: city ?? undefined,
           })
+        }}
+        relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
+        onSetRelayTransitionSec={async (seconds: number) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setRelayTransitionSecMutation({ eventId: event._id, seconds })
         }}
       />
       {/* Toast notifications */}

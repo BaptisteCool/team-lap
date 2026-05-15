@@ -176,6 +176,23 @@ export const updateReplaceAutoWindow = mutation({
 
 // Default value when event has no explicit setting.
 export const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
+export const DEFAULT_RELAY_TRANSITION_SEC = 5
+
+// Set the relay transition penalty in seconds (used for delta calculations + future auto-pass).
+export const setRelayTransitionSec = mutation({
+  args: { eventId: v.id('events'), seconds: v.number() },
+  handler: async (ctx, args) => {
+    const seconds = Math.round(args.seconds)
+    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 60) {
+      throw new ConvexError({
+        code: 'INVALID_RELAY_TRANSITION',
+        message: 'Le temps de transition relai doit être entre 0 et 60 secondes.',
+      })
+    }
+    await ctx.db.patch(args.eventId, { relayTransitionSec: seconds, updatedAt: Date.now() })
+    return seconds
+  },
+})
 
 // Set max runners per team at event level. Refuses if any team would exceed.
 export const setMaxRunnersPerTeam = mutation({

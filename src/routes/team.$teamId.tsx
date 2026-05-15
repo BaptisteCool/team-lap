@@ -565,6 +565,7 @@ function TeamPage() {
             raceStarted={race.started}
             minLapSec={(event as any)?.minLapSec ?? 165}
             maxLapSec={(event as any)?.maxLapSec ?? 480}
+            relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
             ranking={ranking}
             setRanking={setRanking}
             onAddPosition={() => {}}

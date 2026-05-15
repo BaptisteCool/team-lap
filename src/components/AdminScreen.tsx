@@ -58,6 +58,9 @@ interface AdminScreenProps {
   longitude?: number | null
   cityName?: string | null
   onSetLatLng?: (lat: number | null, lng: number | null, cityName?: string | null) => Promise<void> | void
+  // Relay transition penalty (seconds). Default 7. Range 0-60.
+  relayTransitionSec?: number
+  onSetRelayTransitionSec?: (seconds: number) => Promise<void> | void
 }
 
 export function AdminScreen({
@@ -79,7 +82,10 @@ export function AdminScreen({
   longitude,
   cityName,
   onSetLatLng,
+  relayTransitionSec,
+  onSetRelayTransitionSec,
 }: AdminScreenProps) {
+  const evRelayTransition = relayTransitionSec ?? 5
   const navigate = useNavigate()
   const evMaxRunners = maxRunnersPerTeam ?? 10
   const schedule = admin.schedule || { startISO: '', endISO: '' }
@@ -645,6 +651,30 @@ export function AdminScreen({
                         const msg = err?.data?.message || err?.message || 'Erreur capacité'
                         pushToast(msg, 'AlertTriangle')
                         e.target.value = String(evMaxRunners)
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+                <div className="field" style={{ maxWidth: 220 }}>
+                  <span className="field-label">Transition relai (sec)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="60"
+                    className="mono"
+                    defaultValue={evRelayTransition}
+                    title="Pénalité de temps ajoutée au tour qui suit un relai (handover entre coureurs)"
+                    onBlur={async (e) => {
+                      const v = Math.max(0, Math.min(60, Math.round(+e.target.value || 0)))
+                      if (v === evRelayTransition) return
+                      try {
+                        await onSetRelayTransitionSec?.(v)
+                        pushToast(`Transition relai → ${v}s`, 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                        e.target.value = String(evRelayTransition)
                       }
                     }}
                     style={{ textAlign: 'center' }}
