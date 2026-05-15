@@ -656,8 +656,14 @@ export function PlanningScreen({
                   // - scheduled but not started → scheduledStart, but never in the past
                   //   (if scheduledStart already passed without top départ, fallback to now)
                   // - no scheduledStart at all → now
+                  // NOTE: schedule.startISO arrive sans suffixe Z (UTC sliced) — parser
+                  // tel quel via new Date() le traiterait comme local TZ → décalage 2h
+                  // en été. Forcer interprétation UTC en ajoutant 'Z'.
                   const now = Date.now()
-                  const scheduledMs = schedule?.startISO ? new Date(schedule.startISO).getTime() : null
+                  const rawStart = schedule?.startISO
+                  const scheduledMs = rawStart
+                    ? new Date(rawStart.endsWith('Z') ? rawStart : rawStart + 'Z').getTime()
+                    : null
                   const startMs = raceStartTime
                     ? now
                     : (scheduledMs ? Math.max(scheduledMs, now) : now)
