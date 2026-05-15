@@ -19,7 +19,7 @@ function AdminPage() {
   const event = useQuery('events:getBySlug' as any, { slug: '24h-brette-les-pins-2026' })
   
   // Get teams from Convex
-  const teams = useQuery('teams:getTeams' as any, { eventId: event?._id || 'placeholder' })
+  const teams = useQuery('teams:getTeams' as any, event?._id ? { eventId: event._id } : 'skip')
   
   // Interruptions from Convex
   const interruptions = useQuery(
