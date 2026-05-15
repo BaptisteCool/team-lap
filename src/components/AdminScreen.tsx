@@ -198,9 +198,9 @@ export function AdminScreen({
   }
 
   return (
-    <div className="page">
+    <div className="page admin-page">
       <TestModeBadge testMode={testMode} />
-      <div className="grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: 18 }}>
+      <div className="grid admin-main-grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: 18 }}>
         {/* LEFT — Schedule + control + interruptions */}
         <div className="grid" style={{ gap: 18, alignContent: 'start' }}>
           {/* Schedule */}
@@ -260,7 +260,7 @@ export function AdminScreen({
 
               <div className="grid" style={{ gap: 10 }}>
                 <span className="field-label">Lancer la course (globale, toutes équipes)</span>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <div className="race-controls" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button className="btn primary" onClick={startRaceNow} disabled={race.started}>
                     🚀 Lancer maintenant
                   </button>

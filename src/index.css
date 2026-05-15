@@ -133,6 +133,31 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   .hide-on-mobile { display: none !important; }
 }
 
+/* Responsive AdminScreen — collapse multi-column grids to 1 col under 900px (#14) */
+@media (max-width: 900px) {
+  .admin-page .admin-main-grid { grid-template-columns: 1fr !important; gap: 14px !important; }
+  /* Sub-grids fr-based (1fr 1fr / 1fr 1fr 1fr / 1.2fr 1fr) → 1 col mobile.
+     N'affecte pas les grids pixel-based (70px 1fr 110px 110px) ni avatar grid. */
+  .admin-page .card [style*="grid-template-columns: 1fr 1fr"],
+  .admin-page .card [style*="grid-template-columns: 1.2fr 1fr"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+@media (max-width: 720px) {
+  /* Card-head : flex-wrap titre + actions */
+  .admin-page .card-head { flex-wrap: wrap; gap: 8px; }
+  .admin-page .card-head h3 { font-size: 15px; }
+  /* Touch targets minimum 40px hauteur */
+  .admin-page input, .admin-page select, .admin-page button { min-height: 40px; }
+  /* Card body: éviter overflow horizontal */
+  .admin-page .card, .admin-page .card-body { overflow-x: hidden; }
+  /* Inputs flex containers → wrap proprement */
+  .admin-page .card-body [style*="display: flex"][style*="flex-wrap"] { gap: 8px !important; }
+  /* Toolbar boutons race */
+  .admin-page .race-controls { flex-wrap: wrap; }
+  .admin-page .race-controls .btn { flex: 1 1 auto; min-width: 140px; }
+}
+
 /* Read-only mode — disable form interactions inside tab content (header/back stays usable) */
 .page.is-readonly .grid > :not(.card:first-child) input,
 .page.is-readonly .grid > :not(.card:first-child) select,
