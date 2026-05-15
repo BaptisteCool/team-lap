@@ -2,6 +2,7 @@ import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '../convex/hooks'
 import { fmtClock } from '../lib/utils'
+import { UpdateBanner } from '../components/UpdateBanner'
 
 const EVENT_SLUG = '24h-brette-les-pins-2026'
 
@@ -97,6 +98,7 @@ export const Route = createRootRoute({
         <main>
           <Outlet />
         </main>
+        <UpdateBanner />
       </div>
     )
   },
