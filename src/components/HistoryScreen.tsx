@@ -1,5 +1,6 @@
-import React, { useRef, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { ENERGY_LEVELS, fmtClock, fmtLap, fmtPace, isAutoType, isRelayType, kmPaceToLapMs, toLocalDatetime } from '../lib/race-data'
+import { computeLapExpectedMs, computeTeamDelta, deltaToneColor, formatSignedDuration, getDeltaTone } from '../lib/race-calculations'
 
 interface Runner {
   id: string
@@ -59,6 +60,8 @@ interface HistoryScreenProps {
   onAddBulkRelay?: (payload: { runnerId: string; lapTimeMs: number; anchorMs: number; anchorKind: 'start' | 'end'; nbLaps: number; approximate: boolean }) => void
   minLapSec?: number
   maxLapSec?: number
+  // Relay transition penalty (sec, default 7) — applied to expected times for relay laps
+  relayTransitionSec?: number
 }
 
 const LAP_PAGE_STEP = 10
@@ -88,6 +91,7 @@ export function HistoryScreen({
   onAddBulkRelay,
   minLapSec = 165,
   maxLapSec = 480,
+  relayTransitionSec = 5,
 }: HistoryScreenProps) {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [formMode, setFormMode] = useState<null | { kind: 'edit' | 'addAbove' | 'addBelow'; lap: Lap }>(null)
@@ -104,6 +108,15 @@ export function HistoryScreen({
   void runnersFull
 
   const [filterRunnerId, setFilterRunnerId] = useState<string | null>(null)
+  // Team delta vs prévisionnel (toujours global, pas affecté par filtre coureur)
+  const teamDelta = useMemo(
+    () => computeTeamDelta(laps as any, runners as any, relayTransitionSec),
+    [laps, runners, relayTransitionSec],
+  )
+  const teamDeltaTone = getDeltaTone(teamDelta.deltaMs)
+  const teamDeltaColor = deltaToneColor(teamDeltaTone)
+  const lastDeltaTone = teamDelta.lastLapDeltaMs == null ? 'neutral' : getDeltaTone(teamDelta.lastLapDeltaMs)
+  const lastDeltaColor = deltaToneColor(lastDeltaTone)
   // Auto-fallback if filtered runner gets deleted while filter active
   React.useEffect(() => {
     if (filterRunnerId && !runners.find((r) => r.id === filterRunnerId)) {
@@ -375,6 +388,19 @@ export function HistoryScreen({
               </div>
               {bestLap && <div className="hint">{getRunner(bestLap.runnerId)?.name || '—'}</div>}
             </div>
+            <div className="stat">
+              <div className="stat-label" title={`Cumul équipe vs prévisionnel (allure cible + ${relayTransitionSec}s/relai)`}>
+                Avance / Retard
+              </div>
+              <div className="stat-value mono" style={{ color: teamDeltaColor }}>
+                {teamDelta.lapsCounted === 0 ? '—' : formatSignedDuration(teamDelta.deltaMs)}
+              </div>
+              {teamDelta.lastLapDeltaMs != null && (
+                <div className="hint" style={{ color: lastDeltaColor }}>
+                  Dernier {formatSignedDuration(teamDelta.lastLapDeltaMs)}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -437,6 +463,12 @@ export function HistoryScreen({
                 const isAbnormal = expectedMs > 0 && l.lapTime > expectedMs * 2
                 const badge = TYPE_BADGE[l.type] || TYPE_BADGE.checkpoint_manual
                 const plusMinus = lapBadge[l._id || l.id]
+                // Per-row delta — affiché uniquement pour tours manuels (auto = expected, delta=0 inutile)
+                const isManual = l.type === 'checkpoint_manual' || l.type === 'relay_manual'
+                const lapExpected = computeLapExpectedMs(l as any, r as any, relayTransitionSec)
+                const lapDelta = isManual && lapExpected ? l.lapTime - lapExpected : null
+                const lapDeltaTone = lapDelta != null ? getDeltaTone(lapDelta) : 'neutral'
+                const lapDeltaColor = deltaToneColor(lapDeltaTone)
                 return (
                   <div
                     key={l._id || l.id}
@@ -489,6 +521,31 @@ export function HistoryScreen({
                       <span className="lap-val-pace pace mono" data-kind="pace">{fmtPace(l.lapTime)}</span>
                       <span className="lap-val-paris mono" data-kind="paris" style={{ fontSize: 12, color: 'var(--text-2)' }}>🕒 {fmtParisHMS(l.timestamp)}</span>
                       <span className="lap-val-race mono" data-kind="race" style={{ fontSize: 12, color: 'var(--muted)' }}>T+{fmtRaceTime(l.timestamp)}</span>
+                      {lapDelta != null ? (
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: 12,
+                            color: lapDeltaColor,
+                            fontWeight: 600,
+                            minWidth: 56,
+                            textAlign: 'right',
+                          }}
+                          title={`Cible : ${fmtLap(lapExpected!)} · Réel : ${fmtLap(l.lapTime)}`}
+                        >
+                          {formatSignedDuration(lapDelta)}
+                        </span>
+                      ) : (
+                        !isManual && (
+                          <span
+                            className="mono"
+                            style={{ fontSize: 12, color: 'var(--muted)', opacity: 0.4, minWidth: 56, textAlign: 'right' }}
+                            title="Tour auto — pas de delta calculé"
+                          >
+                            —
+                          </span>
+                        )
+                      )}
                     </span>
                     <div style={{ position: 'relative' }}>
                       <button

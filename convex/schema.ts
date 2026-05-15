@@ -60,6 +60,11 @@ export default defineSchema({
     // Display name of the city/location associated with lat/lng (free text).
     // Shown on the weather banner ("Brette les Pins · Prochaines 6h: …").
     cityName: v.optional(v.string()),
+
+    // Relay transition penalty in seconds (default 5s). Applied to expected lap
+    // time when a tour is type relay_*, both for cumulative team delta computation
+    // and (later) for auto-pass scheduling penalty.
+    relayTransitionSec: v.optional(v.number()),
     
     createdAt: v.number(),
     updatedAt: v.number(),
