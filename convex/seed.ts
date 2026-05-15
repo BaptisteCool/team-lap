@@ -130,6 +130,7 @@ export const seedAll = mutation({
       .withIndex('by_slug', (q) => q.eq('slug', slug))
       .first()
     if (existing) {
+      console.log('[seedAll] skipped — event already exists', existing._id)
       return { skipped: true, eventId: existing._id, reason: 'already seeded' }
     }
 
