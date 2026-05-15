@@ -215,16 +215,20 @@ export default defineSchema({
     .index('by_timestamp', ['timestamp'])
     .index('by_lap_id', ['id']),
 
-  // Weather cache (Open-Meteo hourly forecast per event). TTL ~1h.
+  // Weather cache (hourly forecast per event + provider). TTL ~1h.
+  // provider is optional for backward compatibility; legacy rows w/o provider
+  // are treated as 'open-meteo' and re-fetched on next access.
   weather_cache: defineTable({
     eventId: v.id('events'),
+    provider: v.optional(v.string()), // 'open-meteo' | 'met-no' | 'meteo-france'
     fetchedAt: v.number(),
     expiresAt: v.number(),
-    // Raw JSON payload: { time: number[] (ms epoch), temperature_2m: number[],
-    // relative_humidity_2m: number[], weather_code: number[], precipitation_probability: number[] }
+    // Normalized payload: { time: number[] (ms epoch), temperature_2m, relative_humidity_2m,
+    // weather_code, precipitation_probability, timezone, latitude, longitude }
     data: v.any(),
   })
-    .index('by_event', ['eventId']),
+    .index('by_event', ['eventId'])
+    .index('by_event_provider', ['eventId', 'provider']),
 
   // Rankings (computed and stored)
   rankings: defineTable({
