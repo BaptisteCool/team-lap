@@ -216,6 +216,10 @@ async function decideAutoLap(
   event?: any,
 ): Promise<LapType | null> {
   if (!raceStartMs) return null
+  // Race finished (admin) → cron must stop firing for any team
+  if (event?.actualEnd) return null
+  // Team finished individually (captain clicked "Fin de course") → skip
+  if (team?.finishedAt) return null
 
   const runners = await ctx.db
     .query('runners')

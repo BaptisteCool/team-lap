@@ -89,6 +89,25 @@ export const stopRace = mutation({
   },
 })
 
+// Permanently end the event (admin "Arrêter l'événement"). Sets actualEnd + status='finished'.
+// Per CTO #13: NO cascade on teams — captains must still record finish per team
+// (sportive rule: tour entamé compte). Idempotent.
+export const endRace = mutation({
+  args: { eventId: v.id('events') },
+  handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.eventId)
+    if (!event) throw new ConvexError({ code: 'EVENT_NOT_FOUND', message: 'Événement introuvable.' })
+    if ((event as any).actualEnd) return (event as any).actualEnd // idempotent
+    const actualEnd = Date.now()
+    await ctx.db.patch(args.eventId, {
+      status: 'finished',
+      actualEnd,
+      updatedAt: actualEnd,
+    })
+    return actualEnd
+  },
+})
+
 export const correctActualStart = mutation({
   args: { eventId: v.id('events'), actualStart: v.number() },
   handler: async (ctx, args) => {
@@ -102,13 +121,14 @@ export const correctActualStart = mutation({
 export const resetRace = mutation({
   args: { eventId: v.id('events') },
   handler: async (ctx, args) => {
-    // Reset event
+    // Reset event — clear actualStart + actualEnd + back to 'scheduled'
     await ctx.db.patch(args.eventId, {
       status: 'scheduled',
       actualStart: undefined,
+      actualEnd: undefined,
       updatedAt: Date.now(),
     })
-    // Delete all laps for teams of this event
+    // Delete all laps for teams + clear team race state (currentIdx, ready, finished, autoPaused, cooldown, group queue)
     const teams = await ctx.db
       .query('teams')
       .withIndex('by_event', (q) => q.eq('eventId', args.eventId))
@@ -119,7 +139,16 @@ export const resetRace = mutation({
         .withIndex('by_team', (q) => q.eq('teamId', team._id))
         .collect()
       for (const lap of laps) await ctx.db.delete(lap._id)
-      await ctx.db.patch(team._id, { currentIdx: 0, ready: false, updatedAt: Date.now() })
+      await ctx.db.patch(team._id, {
+        currentIdx: 0,
+        ready: false,
+        finishedAt: undefined,
+        finishedByLap: undefined,
+        autoPaused: undefined,
+        cronCooldownUntil: undefined,
+        groupModeQueue: undefined,
+        updatedAt: Date.now(),
+      })
     }
     // Delete all interruptions for this event
     const interruptions = await ctx.db

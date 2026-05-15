@@ -45,6 +45,7 @@ function AdminPage() {
   const setLatLngMutation = useMutation('events:setLatLng' as any)
   const setRelayTransitionSecMutation = useMutation('events:setRelayTransitionSec' as any)
   const setTestModeMutation = useMutation('events:setTestMode' as any)
+  const endRaceMutation = useMutation('events:endRace' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
   const endItrMutation = useMutation('events:endInterruption' as any)
   const updateItrMutation = useMutation('events:updateInterruption' as any)
@@ -406,6 +407,11 @@ function AdminPage() {
             return 'Départ dans moins de 10 min'
           return undefined
         })()}
+        actualEnd={(event as any)?.actualEnd ?? null}
+        onEndRace={async () => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await endRaceMutation({ eventId: event._id })
+        }}
       />
       {/* Toast notifications */}
       <div className="toast-stack">

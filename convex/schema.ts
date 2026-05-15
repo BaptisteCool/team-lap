@@ -70,6 +70,10 @@ export default defineSchema({
     // relayTransitionSec) are overridden by TEST_TIMINGS constants for fast-iteration
     // testing. Locked once race < 10 min from start or status != 'scheduled'.
     testMode: v.optional(v.boolean()),
+
+    // Real end of the race (set by admin via "Arrêter l'événement"). Cron auto-pass
+    // skips events with actualEnd. Distinct from scheduledEnd which is theoretical.
+    actualEnd: v.optional(v.number()),
     
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -117,6 +121,11 @@ export default defineSchema({
     
     // Race state
     currentIdx: v.number(), // current runner index in order
+
+    // Manual race finish per team: set when captain clicks "Fin de course" after scheduledEnd.
+    // Cron auto-pass skips teams with finishedAt set. Idempotent set.
+    finishedAt: v.optional(v.number()),
+    finishedByLap: v.optional(v.number()), // snapshot lap count at finish
 
     // Group-relay mode queue — head = active/pending entry; rest = upcoming entries
     groupModeQueue: v.optional(v.array(v.object({

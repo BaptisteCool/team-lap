@@ -63,6 +63,7 @@ function TeamPage() {
   const upsertRunnerMutation = useMutation('teams:upsertRunner' as any)
   const deleteRunnerMutation = useMutation('teams:deleteRunner' as any)
   const setAutoPausedMutation = useMutation('teams:setAutoPaused' as any)
+  const recordFinishMutation = useMutation('teams:recordFinish' as any)
   // Weather (multi-provider via Convex). User pref persisted in localStorage.
   const [weatherProvider, setWeatherProvider] = useState<WeatherProviderId>(() => readPreferredProvider())
   const [weatherDialogOpen, setWeatherDialogOpen] = useState(false)
@@ -550,6 +551,12 @@ function TeamPage() {
             replaceAutoWindowSec={(event as any)?.replaceAutoWindowSec ?? 180}
             minLapSec={(event as any)?.minLapSec ?? 165}
             relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
+            scheduledEnd={(event as any)?.scheduledEnd ?? null}
+            teamFinishedAt={(teamData as any)?.finishedAt ?? null}
+            onRecordTeamFinish={async () => {
+              if (readonly || !teamData?._id) return
+              await recordFinishMutation({ teamId: teamData._id })
+            }}
             pushToast={pushToast}
             onSetAutoPaused={(paused) => {
               if (readonly || !teamData?._id) return

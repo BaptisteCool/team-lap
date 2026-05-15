@@ -87,6 +87,11 @@ interface LiveScreenProps {
   maxLapSec?: number
   // Relay handover penalty (sec, default 5) — marker freezes at line during this window
   relayTransitionSec?: number
+  // Race finish: scheduledEnd (ms epoch) drives bouton "Fin de course" switch.
+  // team.finishedAt set → équipe terminée, all controls disabled.
+  scheduledEnd?: number | null
+  teamFinishedAt?: number | null
+  onRecordTeamFinish?: () => void | Promise<void>
   pushToast?: (text: string, icon?: string, action?: { label: string; fn: () => void }) => void
 }
 
@@ -112,6 +117,9 @@ export function LiveScreen({
   minLapSec = 165,
   maxLapSec = 480,
   relayTransitionSec = 5,
+  scheduledEnd,
+  teamFinishedAt,
+  onRecordTeamFinish,
   pushToast,
 }: LiveScreenProps) {
   const [nowReal, setNowReal] = useState(Date.now())
@@ -685,7 +693,28 @@ export function LiveScreen({
 
             {/* Controls */}
             <div className="controls">
-              {race.started && realLaps.length === 0 ? (
+              {teamFinishedAt ? (
+                <div
+                  style={{
+                    gridColumn: '1 / -1',
+                    padding: '14px 18px',
+                    borderRadius: 10,
+                    background: 'oklch(0.86 0.20 135 / 0.10)',
+                    border: '1px solid oklch(0.86 0.20 135 / 0.40)',
+                    color: 'oklch(0.92 0.20 135)',
+                    textAlign: 'center',
+                    fontWeight: 600,
+                  }}
+                >
+                  🏁 Équipe terminée à{' '}
+                  {new Date(teamFinishedAt).toLocaleTimeString('fr-FR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    timeZone: 'Europe/Paris',
+                  })}
+                </div>
+              ) : race.started && realLaps.length === 0 ? (
                 <button className="big-btn start" style={{ gridColumn: '1 / -1' }} onClick={() => recordLap(false)}>
                   <span className="label-top">Démarrage tardif de l'équipe</span>
                   <span className="label-main">Lancer l'équipe avec le passage de {currentRunner?.name || '—'}</span>
@@ -718,44 +747,72 @@ export function LiveScreen({
                           : `Tour validé · ${currentRunner?.name}. Calibre à la seconde près.`}
                     </span>
                   </button>
-                  <button
-                    className={`big-btn relay ${lapsRemainingInRelay > 0 && race.started ? 'is-warn' : ''}`}
-                    disabled={!canClick}
-                    onClick={() => recordLap(true)}
-                  >
-                    <span className="label-top">
-                      Relai → {nextRunner?.name || '—'}
-                      {nextRunner?.status === 'uncertain' && (
-                        <span
-                          className="badge"
-                          style={{
-                            marginLeft: 6,
-                            fontSize: 10,
-                            background: 'oklch(0.82 0.17 70 / 0.20)',
-                            color: 'oklch(0.92 0.17 70)',
-                            border: '1px solid oklch(0.82 0.17 70 / 0.55)',
-                            padding: '1px 5px',
-                            borderRadius: 4,
-                          }}
-                          title="Coureur incertain"
-                        >
-                          ? Incertain
-                        </span>
-                      )}
-                    </span>
-                    <span className="label-main mono">
-                      {!race.started ? '—' : team?.autoPaused ? '⏸ PAUSE' : etaRelay > 0 ? `Estim. ${fmtLap(etaRelay)}` : 'maintenant'}
-                    </span>
-                    <span className="label-sub">
-                      {!race.started
-                        ? 'En attente du top départ'
-                        : (
-                          <>
-                            Reste <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{fractionalRemaining.toFixed(1).replace('.', ',')}</span> tour{fractionalRemaining >= 2 ? 's' : ''} pour {currentRunner?.name}.
-                          </>
+                  {scheduledEnd && Date.now() > scheduledEnd ? (
+                    <button
+                      className="big-btn relay"
+                      style={{
+                        background: 'oklch(0.72 0.21 25 / 0.18)',
+                        borderColor: 'oklch(0.72 0.21 25 / 0.5)',
+                        color: 'oklch(0.85 0.18 25)',
+                      }}
+                      onClick={async () => {
+                        if (!onRecordTeamFinish) return
+                        if (!window.confirm("Fin de course pour cette équipe ?\n\nLe coureur en piste a passé la ligne après l'heure de fin. Action irréversible.")) return
+                        try {
+                          await onRecordTeamFinish()
+                          pushToast?.('🏁 Équipe terminée', 'Flag')
+                        } catch (err: any) {
+                          const msg = err?.data?.message || err?.message || 'Erreur'
+                          pushToast?.(msg, 'AlertTriangle')
+                        }
+                      }}
+                    >
+                      <span className="label-top">🏁 Fin de course</span>
+                      <span className="label-main mono">Arrêter cette équipe</span>
+                      <span className="label-sub">
+                        Le coureur a passé la ligne après l'heure de fin. Click pour valider.
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      className={`big-btn relay ${lapsRemainingInRelay > 0 && race.started ? 'is-warn' : ''}`}
+                      disabled={!canClick}
+                      onClick={() => recordLap(true)}
+                    >
+                      <span className="label-top">
+                        Relai → {nextRunner?.name || '—'}
+                        {nextRunner?.status === 'uncertain' && (
+                          <span
+                            className="badge"
+                            style={{
+                              marginLeft: 6,
+                              fontSize: 10,
+                              background: 'oklch(0.82 0.17 70 / 0.20)',
+                              color: 'oklch(0.92 0.17 70)',
+                              border: '1px solid oklch(0.82 0.17 70 / 0.55)',
+                              padding: '1px 5px',
+                              borderRadius: 4,
+                            }}
+                            title="Coureur incertain"
+                          >
+                            ? Incertain
+                          </span>
                         )}
-                    </span>
-                  </button>
+                      </span>
+                      <span className="label-main mono">
+                        {!race.started ? '—' : team?.autoPaused ? '⏸ PAUSE' : etaRelay > 0 ? `Estim. ${fmtLap(etaRelay)}` : 'maintenant'}
+                      </span>
+                      <span className="label-sub">
+                        {!race.started
+                          ? 'En attente du top départ'
+                          : (
+                            <>
+                              Reste <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{fractionalRemaining.toFixed(1).replace('.', ',')}</span> tour{fractionalRemaining >= 2 ? 's' : ''} pour {currentRunner?.name}.
+                            </>
+                          )}
+                      </span>
+                    </button>
+                  )}
                 </>
               )}
             </div>
