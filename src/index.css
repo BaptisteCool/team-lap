@@ -127,9 +127,18 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
 
 .team-tabs { width: 100%; }
 .team-tabs .tab { flex: 1 1 auto; justify-content: center; min-width: 0; }
+.team-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", emoji, sans-serif;
+  line-height: 1;
+}
 @media (max-width: 720px) {
-  .team-tabs .tab { padding: 8px 10px; font-size: 13px; }
+  .team-tabs .tab { padding: 10px 12px; font-size: 13px; min-height: 44px; }
   .team-tabs .team-tab-label { display: none; }
+  /* Icon plus grand quand label masqué — assure visibilité tactile */
+  .team-tabs .team-tab-icon { font-size: 22px; }
   .hide-on-mobile { display: none !important; }
 }
 
