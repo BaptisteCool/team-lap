@@ -55,14 +55,46 @@ export const resolveId = query({
 
 // ─── Race control mutations ────────────────────────────────────────────────
 
+const LAP_DISTANCE_M_FALLBACK = 900
+function kmPaceToLapMsLocal(kmMin: number, kmSec: number, lapDistanceM: number): number {
+  const paceSeconds = kmMin * 60 + kmSec
+  const lapSeconds = (paceSeconds * lapDistanceM) / 1000
+  return Math.round(lapSeconds * 1000)
+}
+
+// Snapshot theoretical cycle (#17) for each team at race start: sum(lapMs * plannedLaps)
+async function snapshotTheoreticalCycles(ctx: any, eventId: any, lapDistanceM: number) {
+  const teams = await ctx.db
+    .query('teams')
+    .withIndex('by_event', (q: any) => q.eq('eventId', eventId))
+    .collect()
+  for (const team of teams) {
+    const runners = await ctx.db
+      .query('runners')
+      .withIndex('by_team', (q: any) => q.eq('teamId', team._id))
+      .collect()
+    const cycleMs = runners
+      .filter((r: any) => r.status !== 'out')
+      .reduce(
+        (sum: number, r: any) =>
+          sum + kmPaceToLapMsLocal(r.kmMin || 0, r.kmSec || 0, lapDistanceM) * (r.plannedLaps || 1),
+        0,
+      )
+    await ctx.db.patch(team._id, { theoreticalCycleMs: cycleMs, updatedAt: Date.now() })
+  }
+}
+
 export const startRaceNow = mutation({
   args: { eventId: v.id('events') },
   handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.eventId)
+    const lapDistanceM = (event as any)?.lapDistance || LAP_DISTANCE_M_FALLBACK
     await ctx.db.patch(args.eventId, {
       status: 'running',
       actualStart: Date.now(),
       updatedAt: Date.now(),
     })
+    await snapshotTheoreticalCycles(ctx, args.eventId, lapDistanceM)
   },
 })
 
@@ -71,11 +103,13 @@ export const startRaceAtScheduled = mutation({
   handler: async (ctx, args) => {
     const event = await ctx.db.get(args.eventId)
     if (!event?.scheduledStart) return
+    const lapDistanceM = (event as any)?.lapDistance || LAP_DISTANCE_M_FALLBACK
     await ctx.db.patch(args.eventId, {
       status: 'running',
       actualStart: event.scheduledStart,
       updatedAt: Date.now(),
     })
+    await snapshotTheoreticalCycles(ctx, args.eventId, lapDistanceM)
   },
 })
 
@@ -147,6 +181,7 @@ export const resetRace = mutation({
         autoPaused: undefined,
         cronCooldownUntil: undefined,
         groupModeQueue: undefined,
+        theoreticalCycleMs: undefined,
         updatedAt: Date.now(),
       })
     }
