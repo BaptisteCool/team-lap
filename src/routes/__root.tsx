@@ -1,18 +1,30 @@
 import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
-import { useEffect } from 'react'
-import { useMutation } from '../convex/hooks'
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery } from '../convex/hooks'
 import { fmtClock } from '../lib/utils'
+
+const EVENT_SLUG = '24h-brette-les-pins-2026'
 
 export const Route = createRootRoute({
   component: () => {
-    // TODO: Get event status from Convex when data is available
-    // const eventStatus = useQuery(api.functions.getEventStatus, { eventId: 'default' as any })
-    const raceStarted = false
-    const raceStartTime = null
+    const event = useQuery('events:getBySlug' as any, { slug: EVENT_SLUG }) as any
+    const [now, setNow] = useState(Date.now())
+    useEffect(() => {
+      const id = setInterval(() => setNow(Date.now()), 1000)
+      return () => clearInterval(id)
+    }, [])
 
-    const RACE_MS = 24 * 3600 * 1000
-    const elapsed = 0
-    const remaining = RACE_MS
+    const status = event?.status as string | undefined
+    const raceStarted = status === 'running'
+    const raceFinished = status === 'finished' || event?.actualEnd
+    const racePaused = status === 'paused'
+    const raceStartTime: number | null = event?.actualStart || null
+    const RACE_MS = (event?.raceDuration as number) || 24 * 3600 * 1000
+    const scheduledStartMs = (event?.scheduledStart as number) || null
+
+    const elapsed = raceStartTime ? Math.max(0, Math.min(now - raceStartTime, RACE_MS)) : 0
+    const remaining = raceStartTime ? Math.max(0, RACE_MS - elapsed) : RACE_MS
+    const tilStart = scheduledStartMs ? scheduledStartMs - now : null
 
     // Client-side cron fallback — local Convex backend doesn't run scheduled crons.
     // Fires immediately on mount + every 5s on every page; server-side debounced (MIN_LAP_GAP_MS=5s).
@@ -38,7 +50,7 @@ export const Route = createRootRoute({
                 height={36}
                 style={{ borderRadius: 8, flexShrink: 0, display: 'block' }}
               />
-              <div>
+              <div className="brand-text">
                 <div className="brand-name">TeamLap</div>
                 <div className="brand-sub">Relais 24h</div>
               </div>
@@ -47,25 +59,39 @@ export const Route = createRootRoute({
           
           <div className="topbar-spacer" />
           
-          <Link to="/" className="btn ghost">
+          <Link to="/" className="btn ghost hide-on-mobile">
             Accueil
           </Link>
           
           <div className={`live-pill ${raceStarted ? 'is-live' : ''}`}>
             <span className="live-dot"></span>
-            {raceStarted && raceStartTime
-              ? (
-                  <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                    <span>LIVE</span>
-                    <span>{fmtClock(elapsed)}</span>
-                    <span style={{ color: 'var(--muted)' }}>·</span>
-                    <span style={{ color: 'var(--text-2)' }}>−{fmtClock(remaining)}</span>
-                  </span>
-                )
-              : (
-                <span>Stand‑by</span>
-              )
-            }
+            {raceFinished ? (
+              <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <span>🏁</span>
+                <span>Terminée</span>
+                {raceStartTime && <span>{fmtClock(elapsed)}</span>}
+              </span>
+            ) : racePaused && raceStartTime ? (
+              <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <span>⏸</span>
+                <span>PAUSE</span>
+                <span>{fmtClock(elapsed)}</span>
+              </span>
+            ) : raceStarted && raceStartTime ? (
+              <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <span>LIVE</span>
+                <span>{fmtClock(elapsed)}</span>
+                <span style={{ color: 'var(--muted)' }}>·</span>
+                <span style={{ color: 'var(--text-2)' }}>−{fmtClock(remaining)}</span>
+              </span>
+            ) : tilStart != null && tilStart > 0 ? (
+              <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                <span>Départ dans</span>
+                <span>{fmtClock(tilStart)}</span>
+              </span>
+            ) : (
+              <span>Stand‑by</span>
+            )}
           </div>
         </header>
         <main>

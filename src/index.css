@@ -140,6 +140,8 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   /* Icon plus grand quand label masqué — assure visibilité tactile */
   .team-tabs .team-tab-icon { font-size: 22px; }
   .hide-on-mobile { display: none !important; }
+  /* AppBar mobile: cache nom + sous-titre, garde icon seul */
+  .topbar .brand-text { display: none; }
 }
 
 /* Responsive AdminScreen — collapse multi-column grids to 1 col under 900px (#14) */
