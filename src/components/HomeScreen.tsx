@@ -113,10 +113,24 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
         }
         return kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
       })()
+      // If the most recent team lap was a relay, the new runner is in handover
+      // window: marker stays at 0% (sur la ligne) for relayTransitionSec, then progress.
+      const lastLap = tLaps.length ? tLaps[tLaps.length - 1] : null
+      const lastWasRelay = lastLap && (lastLap.type === 'relay_manual' || lastLap.type === 'relay_auto')
+      const relayOffsetMs = lastWasRelay ? ((event as any)?.relayTransitionSec ?? 5) * 1000 : 0
       let progress = 0
+      let inHandoverWindow = false
+      let handoverRemainingSec = 0
       if (raceStarted && lastLapAt && expectedLapMs > 0) {
-        progress = ((now - lastLapAt) / expectedLapMs) % 1
-        if (progress < 0) progress = 0
+        const elapsedSinceLast = now - lastLapAt
+        if (relayOffsetMs > 0 && elapsedSinceLast < relayOffsetMs) {
+          progress = 0
+          inHandoverWindow = true
+          handoverRemainingSec = Math.max(0, Math.ceil((relayOffsetMs - elapsedSinceLast) / 1000))
+        } else {
+          progress = ((elapsedSinceLast - relayOffsetMs) / expectedLapMs) % 1
+          if (progress < 0) progress = 0
+        }
       }
       // Freeze marker just before line when team's cron is paused (runner stopped)
       if (t.autoPaused) progress = 0.92
@@ -124,7 +138,7 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
         id: t._id,
         color: t.color || TEAM_COLOR_PALETTE[0],
         progress,
-        label: t.name || '',
+        label: inHandoverWindow ? `${t.name || ''} · 🤝 ${handoverRemainingSec}s` : (t.name || ''),
       }
     })
 

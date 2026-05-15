@@ -218,6 +218,11 @@ export default defineSchema({
       remainingRelays: v.number(),
       status: v.union(v.literal('active'), v.literal('pending')),
     }))),
+
+    // Marks the FIRST lap of a runner just after a relay → auto-pass + GPS marker UI must
+    // wait an additional offset (relayTransitionMsApplied snapshot) before firing/moving.
+    isFirstAfterRelay: v.optional(v.boolean()),
+    relayTransitionMsApplied: v.optional(v.number()),
   })
     .index('by_team', ['teamId'])
     .index('by_team_runner', ['teamId', 'runnerId'])
