@@ -260,9 +260,18 @@ async function decideAutoLap(
   const kmMin = liveOk ? runner.liveKmMin : (runner.kmMin ?? 6)
   const kmSec = liveOk ? runner.liveKmSec : (runner.kmSec ?? 0)
   const paceSec = kmMin * 60 + kmSec
-  const expectedLapMs = Math.round((paceSec * lapDistanceM) / 1000) * 1000
+  const baseExpectedLapMs = Math.round((paceSec * lapDistanceM) / 1000) * 1000
   // Defensive: never fire below the admin min-lap floor
-  if (expectedLapMs < minLapMs) throw new Error(`decide:expected too short=${expectedLapMs} < ${minLapMs}`)
+  if (baseExpectedLapMs < minLapMs) throw new Error(`decide:expected too short=${baseExpectedLapMs} < ${minLapMs}`)
+
+  // Add relay-transition penalty if the previous team lap was a relay → the current
+  // upcoming lap is the first lap of the new runner (handover handled in same window).
+  const prevLapForOffset = lastLap as any
+  const prevWasRelay =
+    prevLapForOffset && (prevLapForOffset.type === 'relay_manual' || prevLapForOffset.type === 'relay_auto')
+  const relayTransitionSec = (event as any)?.relayTransitionSec ?? 5
+  const offsetMs = prevWasRelay ? relayTransitionSec * 1000 : 0
+  const expectedLapMs = baseExpectedLapMs + offsetMs
 
   // Tolerance: only auto-trigger when expected time is reached or slightly past
   if (elapsed < expectedLapMs) throw new Error(`decide:not ready elapsed=${elapsed}<expected=${expectedLapMs} runner=${runner.name}`)
@@ -350,6 +359,22 @@ async function applyLap(
   // Snapshot runner.plannedLaps at insert time (for tour +/- badges later, immune to runner config edits)
   const runnerForLap = runners.find((r: any) => r.id === currentRunnerLocalId)
   const plannedAtStart = runnerForLap?.plannedLaps ?? undefined
+  // Snapshot relay transition flag if the PREVIOUS team lap was a relay (handover penalty
+  // applies to the very first lap of the next runner only). Reads kept untouched lapsAfterReplace
+  // since 'allTeamLaps' was loaded earlier in this handler — re-fetch is overkill for current scope.
+  const teamLapsForFlag = await ctx.db
+    .query('laps')
+    .withIndex('by_team', (q: any) => q.eq('teamId', teamId))
+    .collect()
+  const prevTeamLap = teamLapsForFlag
+    .filter((l: any) => l.type !== 'position')
+    .sort((a: any, b: any) => b.timestamp - a.timestamp)[0]
+  const prevWasRelay = prevTeamLap && (prevTeamLap.type === 'relay_manual' || prevTeamLap.type === 'relay_auto')
+  const eventForFlag = await ctx.db.get(team.eventId)
+  const relayTransitionSec = (eventForFlag as any)?.relayTransitionSec ?? 5
+  const isFirstAfterRelay = prevWasRelay ? true : undefined
+  const relayTransitionMsApplied = prevWasRelay ? relayTransitionSec * 1000 : undefined
+
   const docId = await ctx.db.insert('laps', {
     teamId,
     runnerId: currentRunnerLocalId,
@@ -363,6 +388,8 @@ async function applyLap(
     plannedAtStart,
     replaces: opts.replaces,
     prevGroupModeQueue,
+    isFirstAfterRelay,
+    relayTransitionMsApplied,
   })
 
   if (isRelay) {

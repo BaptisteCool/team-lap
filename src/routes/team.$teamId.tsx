@@ -547,6 +547,7 @@ function TeamPage() {
             }}
             replaceAutoWindowSec={(event as any)?.replaceAutoWindowSec ?? 180}
             minLapSec={(event as any)?.minLapSec ?? 165}
+            relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
             pushToast={pushToast}
             onSetAutoPaused={(paused) => {
               if (readonly || !teamData?._id) return

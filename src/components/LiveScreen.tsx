@@ -85,6 +85,8 @@ interface LiveScreenProps {
   replaceAutoWindowSec?: number
   minLapSec?: number
   maxLapSec?: number
+  // Relay handover penalty (sec, default 5) — marker freezes at line during this window
+  relayTransitionSec?: number
   pushToast?: (text: string, icon?: string, action?: { label: string; fn: () => void }) => void
 }
 
@@ -109,6 +111,7 @@ export function LiveScreen({
   replaceAutoWindowSec,
   minLapSec = 165,
   maxLapSec = 480,
+  relayTransitionSec = 5,
   pushToast,
 }: LiveScreenProps) {
   const [nowReal, setNowReal] = useState(Date.now())
@@ -864,13 +867,18 @@ export function LiveScreen({
               <div className="live-map">
                 <GpxMap
                   showLabel={false}
-                  progress={
-                    race.started && expectedLapMs > 0
-                      ? team?.autoPaused
-                        ? 0.92 // freeze marker just before finish line while paused
-                        : (effCurrentLapMs / expectedLapMs) % 1
-                      : undefined
-                  }
+                  progress={(() => {
+                    if (!race.started || expectedLapMs <= 0) return undefined
+                    if (team?.autoPaused) return 0.92
+                    // Relay handover freeze: marker stays at line for relayTransitionSec
+                    // after a relay_* lap (handover between runners).
+                    const lastIsRelay =
+                      effLastLap && (effLastLap.type === 'relay_manual' || effLastLap.type === 'relay_auto')
+                    const offsetMs = lastIsRelay ? relayTransitionSec * 1000 : 0
+                    if (offsetMs > 0 && effCurrentLapMs < offsetMs) return 0
+                    const progressMs = Math.max(0, effCurrentLapMs - offsetMs)
+                    return (progressMs / expectedLapMs) % 1
+                  })()}
                 />
               </div>
               <div className="stat-row" style={{ marginTop: 12 }}>
