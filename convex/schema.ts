@@ -48,6 +48,32 @@ export default defineSchema({
     // Physical lap time bounds (seconds) — used by form validation. Defaults: 165 (2:45) and 480 (8:00).
     minLapSec: v.optional(v.number()),
     maxLapSec: v.optional(v.number()),
+
+    // Max runners per team (uniform across all teams of this event). Default 10.
+    maxRunnersPerTeam: v.optional(v.number()),
+
+    // Geolocation for weather forecast lookup (Met.no). Optional — UI hides
+    // weather widgets when missing. Validated client-side: -90..90 / -180..180.
+    latitude: v.optional(v.number()),
+    longitude: v.optional(v.number()),
+
+    // Display name of the city/location associated with lat/lng (free text).
+    // Shown on the weather banner ("Brette les Pins · Prochaines 6h: …").
+    cityName: v.optional(v.string()),
+
+    // Relay transition penalty in seconds (default 5s). Applied to expected lap
+    // time when a tour is type relay_*, both for cumulative team delta computation
+    // and (later) for auto-pass scheduling penalty.
+    relayTransitionSec: v.optional(v.number()),
+
+    // Test mode: when true, runtime timings (minLapSec/maxLapSec/replaceAutoWindowSec/
+    // relayTransitionSec) are overridden by TEST_TIMINGS constants for fast-iteration
+    // testing. Locked once race < 10 min from start or status != 'scheduled'.
+    testMode: v.optional(v.boolean()),
+
+    // Real end of the race (set by admin via "Arrêter l'événement"). Cron auto-pass
+    // skips events with actualEnd. Distinct from scheduledEnd which is theoretical.
+    actualEnd: v.optional(v.number()),
     
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -79,9 +105,12 @@ export default defineSchema({
     goalLaps: v.number(), // target laps
     
     // Team configuration
-    maxRunners: v.number(),
+    // DEPRECATED: per-team capacity. Source of truth is event.maxRunnersPerTeam.
+    // Kept optional during transition to avoid breaking existing data.
+    maxRunners: v.optional(v.number()),
     ready: v.boolean(), // marked as ready for race start
     autoPaused: v.optional(v.boolean()), // when true, cron skips auto laps for this team until next manual action
+    cronCooldownUntil: v.optional(v.number()), // timestamp until which cron autoTick must skip this team (set after manual record)
     
     // Profile image (optional)
     profileImage: v.optional(v.string()), // URL to team profile image
@@ -92,7 +121,19 @@ export default defineSchema({
     
     // Race state
     currentIdx: v.number(), // current runner index in order
-    
+
+    // Manual race finish per team: set when captain clicks "Fin de course" after scheduledEnd.
+    // Cron auto-pass skips teams with finishedAt set. Idempotent set.
+    finishedAt: v.optional(v.number()),
+    finishedByLap: v.optional(v.number()), // snapshot lap count at finish
+
+    // Group-relay mode queue — head = active/pending entry; rest = upcoming entries
+    groupModeQueue: v.optional(v.array(v.object({
+      groupName: v.string(),
+      remainingRelays: v.number(),
+      status: v.union(v.literal('active'), v.literal('pending')),
+    }))),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -125,6 +166,9 @@ export default defineSchema({
     color: v.optional(v.string()),
     status: v.optional(v.string()), // 'ready' | 'uncertain' | 'out'
     gender: v.optional(v.string()), // 'Homme' | 'Femme' | 'Autre'
+
+    // Optional sub-group membership ('A', 'B', 'Nuit', etc.) — used by group-relay mode
+    group: v.optional(v.string()),
 
     createdAt: v.number(),
   })
@@ -181,11 +225,38 @@ export default defineSchema({
       autoRelay: v.optional(v.boolean()),
       prevCurrentIdx: v.optional(v.number()),
     })),
+
+    // Snapshot of team.groupModeQueue BEFORE this lap was inserted (for clean undo of group-mode decrements)
+    prevGroupModeQueue: v.optional(v.array(v.object({
+      groupName: v.string(),
+      remainingRelays: v.number(),
+      status: v.union(v.literal('active'), v.literal('pending')),
+    }))),
+
+    // Marks the FIRST lap of a runner just after a relay → auto-pass + GPS marker UI must
+    // wait an additional offset (relayTransitionMsApplied snapshot) before firing/moving.
+    isFirstAfterRelay: v.optional(v.boolean()),
+    relayTransitionMsApplied: v.optional(v.number()),
   })
     .index('by_team', ['teamId'])
     .index('by_team_runner', ['teamId', 'runnerId'])
     .index('by_timestamp', ['timestamp'])
     .index('by_lap_id', ['id']),
+
+  // Weather cache (hourly forecast per event + provider). TTL ~1h.
+  // provider is optional for backward compatibility; legacy rows w/o provider
+  // are treated as 'open-meteo' and re-fetched on next access.
+  weather_cache: defineTable({
+    eventId: v.id('events'),
+    provider: v.optional(v.string()), // 'open-meteo' | 'met-no' | 'meteo-france'
+    fetchedAt: v.number(),
+    expiresAt: v.number(),
+    // Normalized payload: { time: number[] (ms epoch), temperature_2m, relative_humidity_2m,
+    // weather_code, precipitation_probability, timezone, latitude, longitude }
+    data: v.any(),
+  })
+    .index('by_event', ['eventId'])
+    .index('by_event_provider', ['eventId', 'provider']),
 
   // Rankings (computed and stored)
   rankings: defineTable({

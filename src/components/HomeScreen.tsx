@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '../convex/hooks'
 import { fmtClock, fmtKmPace, kmPaceToLapMs, LAP_DISTANCE_M, TEAM_COLOR_PALETTE } from '../lib/race-data'
 import { GpxMap } from './GpxMap'
+import { TestModeBadge } from './TestModeBadge'
 
 interface Runner {
   id: string
@@ -113,23 +114,44 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
         }
         return kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
       })()
+      // If the most recent team lap was a relay, the new runner is in handover
+      // window: marker stays at 0% (sur la ligne) for relayTransitionSec, then progress.
+      const lastLap = tLaps.length ? tLaps[tLaps.length - 1] : null
+      const lastWasRelay = lastLap && (lastLap.type === 'relay_manual' || lastLap.type === 'relay_auto')
+      const relayOffsetMs = lastWasRelay ? ((event as any)?.relayTransitionSec ?? 5) * 1000 : 0
       let progress = 0
+      let inHandoverWindow = false
+      let handoverRemainingSec = 0
       if (raceStarted && lastLapAt && expectedLapMs > 0) {
-        progress = ((now - lastLapAt) / expectedLapMs) % 1
-        if (progress < 0) progress = 0
+        const elapsedSinceLast = now - lastLapAt
+        if (relayOffsetMs > 0 && elapsedSinceLast < relayOffsetMs) {
+          progress = 0
+          inHandoverWindow = true
+          handoverRemainingSec = Math.max(0, Math.ceil((relayOffsetMs - elapsedSinceLast) / 1000))
+        } else {
+          progress = ((elapsedSinceLast - relayOffsetMs) / expectedLapMs) % 1
+          if (progress < 0) progress = 0
+        }
       }
       // Freeze marker just before line when team's cron is paused (runner stopped)
       if (t.autoPaused) progress = 0.92
+      // Team finished → marker frozen on line (sportive end)
+      if ((t as any).finishedAt) progress = 1
       return {
         id: t._id,
         color: t.color || TEAM_COLOR_PALETTE[0],
         progress,
-        label: t.name || '',
+        label: (t as any).finishedAt
+          ? `${t.name || ''} · 🏁`
+          : inHandoverWindow
+            ? `${t.name || ''} · 🤝 ${handoverRemainingSec}s`
+            : (t.name || ''),
       }
     })
 
   return (
     <div className="page">
+      <TestModeBadge testMode={(event as any)?.testMode} />
       <div className="grid" style={{ gap: 18, maxWidth: 980, margin: '0 auto' }}>
         {/* Carte circuit en haut */}
         <div className="card">
@@ -256,6 +278,22 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
                             <span style={{ fontWeight: 600, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {current?.name || '—'}
                             </span>
+                            {current?.status === 'uncertain' && (
+                              <span
+                                style={{
+                                  fontSize: 9,
+                                  padding: '1px 5px',
+                                  borderRadius: 4,
+                                  background: 'oklch(0.82 0.17 70 / 0.18)',
+                                  color: 'oklch(0.82 0.17 70)',
+                                  border: '1px solid oklch(0.82 0.17 70 / 0.5)',
+                                  flexShrink: 0,
+                                }}
+                                title="Coureur incertain"
+                              >
+                                ?
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div style={{ textAlign: 'right' }}>

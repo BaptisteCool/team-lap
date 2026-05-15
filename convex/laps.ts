@@ -1,5 +1,7 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import { computeNextRunnerIdx, consumeQueueOnRelay, type GroupModeEntry } from './lib/nextRunner'
+import { getEffectiveTimings } from './lib/timings'
 
 // Min interval between two laps for the same team (debounce)
 const MIN_LAP_GAP_MS = 5000
@@ -48,14 +50,15 @@ export const recordLap = mutation({
     const now = Date.now()
     const team = await ctx.db.get(args.teamId)
     const event = team ? await ctx.db.get(team.eventId) : null
-    const windowMs = ((event?.replaceAutoWindowSec ?? DEFAULT_REPLACE_AUTO_WINDOW_SEC) as number) * 1000
+    const t = getEffectiveTimings(event)
+    const windowMs = t.replaceAutoWindowSec * 1000
     const allTeamLaps = await ctx.db
       .query('laps')
       .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
       .collect()
-    const sortedDesc = allTeamLaps.sort((a, b) => b.timestamp - a.timestamp)
+    const sortedDesc = allTeamLaps.sort((a: any, b: any) => b.timestamp - a.timestamp)
     const lastLap = sortedDesc[0] || null
-    const minLapMs = ((event?.minLapSec ?? 165) as number) * 1000
+    const minLapMs = t.minLapSec * 1000
     const isAutoLast = lastLap && (lastLap.type === 'checkpoint_auto' || lastLap.type === 'relay_auto')
     const isRelayLast = lastLap && (lastLap.type === 'relay_auto' || lastLap.type === 'relay_manual')
     // Replace only if the auto fired VERY recently (race condition window MIN_LAP_GAP_MS = 5s).
@@ -105,15 +108,21 @@ export const recordLap = mutation({
       { runnerOverride: effectiveRunnerOverride, bypassDebounce: true, replaces },
     )
 
-    // Resume cron auto-tick after a manual action
-    await ctx.db.patch(args.teamId, { autoPaused: false, updatedAt: now })
+    // Resume cron auto-tick after a manual action + arm a cooldown so the cron stays out
+    // for the admin-configured window (replaceAutoWindowSec).
+    const cooldownMs = t.replaceAutoWindowSec * 1000
+    await ctx.db.patch(args.teamId, {
+      autoPaused: false,
+      cronCooldownUntil: now + cooldownMs,
+      updatedAt: now,
+    })
 
     // Server-side auto-calibration: update runner.liveKm from the manual lap time.
-    // Use admin-configured lap time bounds so test mode (short laps) calibrates too.
+    // Use effective lap time bounds so test mode (short laps) calibrates too.
     if (result && args.runnerId) {
       const lapTime = (result as any).lapTime as number
-      const minLapMs = ((event?.minLapSec ?? 165) as number) * 1000
-      const maxLapMs = ((event?.maxLapSec ?? 480) as number) * 1000
+      const minLapMs = t.minLapSec * 1000
+      const maxLapMs = t.maxLapSec * 1000
       if (lapTime >= minLapMs && lapTime <= maxLapMs) {
         const lapDistanceM = 900
         const secPerKm = (lapTime / 1000) * (1000 / lapDistanceM)
@@ -165,6 +174,7 @@ export const autoTick = mutation({
         .withIndex('by_event', (q) => q.eq('eventId', event._id))
         .collect()
 
+      const tickNow = Date.now()
       for (const team of teams) {
         if (!team.ready) {
           skipped.push({ teamId: team._id, reason: 'not ready' })
@@ -174,8 +184,12 @@ export const autoTick = mutation({
           skipped.push({ teamId: team._id, reason: 'auto paused' })
           continue
         }
+        if ((team as any).cronCooldownUntil && tickNow < (team as any).cronCooldownUntil) {
+          skipped.push({ teamId: team._id, reason: `cron cooldown ${(team as any).cronCooldownUntil - tickNow}ms` })
+          continue
+        }
         try {
-          const decision = await decideAutoLap(ctx, team, event.actualStart)
+          const decision = await decideAutoLap(ctx, team, event.actualStart, event)
           if (!decision) {
             skipped.push({ teamId: team._id, reason: 'decideAutoLap=null' })
             continue
@@ -198,9 +212,14 @@ export const autoTick = mutation({
 async function decideAutoLap(
   ctx: any,
   team: any,
-  raceStartMs: number | null
+  raceStartMs: number | null,
+  event?: any,
 ): Promise<LapType | null> {
   if (!raceStartMs) return null
+  // Race finished (admin) → cron must stop firing for any team
+  if (event?.actualEnd) return null
+  // Team finished individually (captain clicked "Fin de course") → skip
+  if (team?.finishedAt) return null
 
   const runners = await ctx.db
     .query('runners')
@@ -235,21 +254,30 @@ async function decideAutoLap(
   const elapsed = now - lastLapAt
   if (elapsed < MIN_LAP_GAP_MS) throw new Error(`decide:debounce elapsed=${elapsed}<${MIN_LAP_GAP_MS}`)
 
-  // Expected lap duration (live pace > pace estim > fallback 6:00/km)
-  // Reject absurd live pace (must be 2:00..15:00/km), fall back to estimated.
-  const liveSecPerKm = (runner.liveKmMin ?? -1) * 60 + (runner.liveKmSec ?? 0)
-  const liveOk =
-    runner.liveKmMin != null &&
-    runner.liveKmSec != null &&
-    liveSecPerKm >= 2 * 60 &&
-    liveSecPerKm <= 15 * 60
+  // Expected lap duration (live pace > pace estim).
+  // Use effective lap-time bounds (test mode supports very short laps).
+  const tDecide = getEffectiveTimings(event)
+  const minLapMs = tDecide.minLapSec * 1000
+  const maxLapMs = tDecide.maxLapSec * 1000
+  const lapDistanceM = 900
+  const liveLapMs = (runner.liveKmMin != null && runner.liveKmSec != null)
+    ? Math.round(((runner.liveKmMin * 60 + runner.liveKmSec) * lapDistanceM) / 1000) * 1000
+    : 0
+  const liveOk = liveLapMs > 0 && liveLapMs >= minLapMs && liveLapMs <= maxLapMs
   const kmMin = liveOk ? runner.liveKmMin : (runner.kmMin ?? 6)
   const kmSec = liveOk ? runner.liveKmSec : (runner.kmSec ?? 0)
-  const lapDistanceM = 900
   const paceSec = kmMin * 60 + kmSec
-  const expectedLapMs = Math.round((paceSec * lapDistanceM) / 1000) * 1000
-  // Defensive: never fire if computed expected is unrealistically short (< 30s)
-  if (expectedLapMs < 30 * 1000) throw new Error(`decide:expected too short=${expectedLapMs}`)
+  const baseExpectedLapMs = Math.round((paceSec * lapDistanceM) / 1000) * 1000
+  // Defensive: never fire below the admin min-lap floor
+  if (baseExpectedLapMs < minLapMs) throw new Error(`decide:expected too short=${baseExpectedLapMs} < ${minLapMs}`)
+
+  // Add relay-transition penalty if the previous team lap was a relay → the current
+  // upcoming lap is the first lap of the new runner (handover handled in same window).
+  const prevLapForOffset = lastLap as any
+  const prevWasRelay =
+    prevLapForOffset && (prevLapForOffset.type === 'relay_manual' || prevLapForOffset.type === 'relay_auto')
+  const offsetMs = prevWasRelay ? tDecide.relayTransitionSec * 1000 : 0
+  const expectedLapMs = baseExpectedLapMs + offsetMs
 
   // Tolerance: only auto-trigger when expected time is reached or slightly past
   if (elapsed < expectedLapMs) throw new Error(`decide:not ready elapsed=${elapsed}<expected=${expectedLapMs} runner=${runner.name}`)
@@ -265,7 +293,7 @@ async function decideAutoLap(
     .query('laps')
     .withIndex('by_team', (q: any) => q.eq('teamId', team._id))
     .collect()
-  const sortedDesc = allTeamLaps.sort((a, b) => b.timestamp - a.timestamp)
+  const sortedDesc = allTeamLaps.sort((a: any, b: any) => b.timestamp - a.timestamp)
   let lapsThisStint = 0
   for (const l of sortedDesc) {
     if (l.type === 'relay_manual' || l.type === 'relay_auto') break
@@ -310,7 +338,7 @@ async function applyLap(
     .query('laps')
     .withIndex('by_team', (q: any) => q.eq('teamId', teamId))
     .collect()
-  const sortedDesc = allTeamLaps.sort((a, b) => b.timestamp - a.timestamp)
+  const sortedDesc = allTeamLaps.sort((a: any, b: any) => b.timestamp - a.timestamp)
   const lastLap = sortedDesc[0] || null
   const now = Date.now()
   if (!opts.bypassDebounce && lastLap && now - lastLap.timestamp < MIN_LAP_GAP_MS) return null
@@ -333,9 +361,26 @@ async function applyLap(
   // Snapshot team.currentIdx BEFORE this lap (after any prior auto-replace rollback) so undo can restore.
   const teamFresh = await ctx.db.get(teamId)
   const prevCurrentIdx = teamFresh?.currentIdx ?? 0
+  const prevGroupModeQueue = ((teamFresh as any)?.groupModeQueue || undefined) as GroupModeEntry[] | undefined
   // Snapshot runner.plannedLaps at insert time (for tour +/- badges later, immune to runner config edits)
   const runnerForLap = runners.find((r: any) => r.id === currentRunnerLocalId)
   const plannedAtStart = runnerForLap?.plannedLaps ?? undefined
+  // Snapshot relay transition flag if the PREVIOUS team lap was a relay (handover penalty
+  // applies to the very first lap of the next runner only). Reads kept untouched lapsAfterReplace
+  // since 'allTeamLaps' was loaded earlier in this handler — re-fetch is overkill for current scope.
+  const teamLapsForFlag = await ctx.db
+    .query('laps')
+    .withIndex('by_team', (q: any) => q.eq('teamId', teamId))
+    .collect()
+  const prevTeamLap = teamLapsForFlag
+    .filter((l: any) => l.type !== 'position')
+    .sort((a: any, b: any) => b.timestamp - a.timestamp)[0]
+  const prevWasRelay = prevTeamLap && (prevTeamLap.type === 'relay_manual' || prevTeamLap.type === 'relay_auto')
+  const eventForFlag = await ctx.db.get(team.eventId)
+  const tApply = getEffectiveTimings(eventForFlag)
+  const isFirstAfterRelay = prevWasRelay ? true : undefined
+  const relayTransitionMsApplied = prevWasRelay ? tApply.relayTransitionSec * 1000 : undefined
+
   const docId = await ctx.db.insert('laps', {
     teamId,
     runnerId: currentRunnerLocalId,
@@ -348,14 +393,29 @@ async function applyLap(
     prevCurrentIdx,
     plannedAtStart,
     replaces: opts.replaces,
+    prevGroupModeQueue,
+    isFirstAfterRelay,
+    relayTransitionMsApplied,
   })
 
   if (isRelay) {
-    const nextIdx = (prevCurrentIdx + 1) % order.order.length
-    await ctx.db.patch(teamId, { currentIdx: nextIdx, updatedAt: now })
-    // Reset incoming runner's live pace so they start the relay on their configured target (kmMin/kmSec)
+    // Compute next runner via shared helper — respects group-mode active entry if any
+    const nextIdx = computeNextRunnerIdx({
+      order: order.order,
+      runners: runners as any,
+      currentIdx: prevCurrentIdx,
+      groupModeQueue: prevGroupModeQueue || null,
+    })
     const nextRunnerLocalId = order.order[nextIdx]
     const nextRunnerDoc = runners.find((r: any) => r.id === nextRunnerLocalId)
+    // Consume queue (decrement remainingRelays, recompute head status)
+    const newQueue = consumeQueueOnRelay(prevGroupModeQueue, nextRunnerDoc as any)
+    await ctx.db.patch(teamId, {
+      currentIdx: nextIdx,
+      updatedAt: now,
+      groupModeQueue: newQueue,
+    })
+    // Reset incoming runner's live pace so they start the relay on their configured target (kmMin/kmSec)
     if (nextRunnerDoc) {
       await ctx.db.patch(nextRunnerDoc._id, { liveKmMin: undefined, liveKmSec: undefined })
     }
@@ -399,7 +459,7 @@ export const updateLap = mutation({
         .collect()
       const sorted = allLaps.filter((l) => l._id !== args.lapId).sort((a, b) => a.timestamp - b.timestamp)
       const prev = sorted.filter((l) => l.timestamp < args.timestamp!).pop()
-      const event = await ctx.db.get(lap.teamId).then((t: any) => (t ? ctx.db.get(t.eventId) : null))
+      const event: any = await ctx.db.get(lap.teamId).then((t: any) => (t ? ctx.db.get(t.eventId) : null))
       const refTs = prev ? prev.timestamp : (event?.actualStart || args.timestamp)
       patch.lapTime = Math.max(0, args.timestamp! - refTs)
     }
@@ -556,9 +616,21 @@ export const deleteLap = mutation({
     // Delete the lap first
     await ctx.db.delete(args.lapId)
 
-    // Restore team.currentIdx using the snapshot taken at insert time (most accurate)
+    // Arm cron cooldown so cron doesn't immediately re-fire after undo (gives user time to redo manually)
+    const team = await ctx.db.get(lap.teamId)
+    const event = team ? await ctx.db.get(team.eventId) : null
+    const tUndo = getEffectiveTimings(event)
+    const cooldownMs = tUndo.replaceAutoWindowSec * 1000
+    await ctx.db.patch(lap.teamId, { cronCooldownUntil: now + cooldownMs })
+
+    // Restore team.currentIdx + groupModeQueue using the snapshot taken at insert time (most accurate)
+    const prevGroupQueue = (lap as any).prevGroupModeQueue
     if (snapshotPrevIdx != null) {
-      await ctx.db.patch(lap.teamId, { currentIdx: snapshotPrevIdx, updatedAt: now })
+      await ctx.db.patch(lap.teamId, {
+        currentIdx: snapshotPrevIdx,
+        groupModeQueue: prevGroupQueue ?? undefined,
+        updatedAt: now,
+      })
     } else if (lap.type === 'relay_manual' || lap.type === 'relay_auto') {
       // Legacy laps without snapshot — fall back to simple decrement
       const team = await ctx.db.get(lap.teamId)

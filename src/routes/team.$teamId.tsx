@@ -1,11 +1,20 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ContactScreen } from '../components/ContactScreen'
 import { HistoryScreen } from '../components/HistoryScreen'
 import { LiveScreen } from '../components/LiveScreen'
 import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
-import { useMutation, useQuery } from '../convex/hooks'
+import { useAction, useMutation, useQuery } from '../convex/hooks'
+import { WeatherSourceDialog } from '../components/WeatherSourceDialog'
+import { TestModeBadge } from '../components/TestModeBadge'
+import {
+  DEFAULT_PROVIDER as WEATHER_DEFAULT_PROVIDER,
+  PROVIDERS as WEATHER_PROVIDERS,
+  type ProviderId as WeatherProviderId,
+  readPreferredProvider,
+  writePreferredProvider,
+} from '../lib/weather-providers'
 import { DEFAULT_RUNNERS, estimateGoalLaps, RUNNER_PALETTE, TEAM_COLOR_PALETTE, emptyTeamSlice } from '../lib/race-data'
 
 const EVENT_SLUG = '24h-brette-les-pins-2026'
@@ -54,6 +63,38 @@ function TeamPage() {
   const upsertRunnerMutation = useMutation('teams:upsertRunner' as any)
   const deleteRunnerMutation = useMutation('teams:deleteRunner' as any)
   const setAutoPausedMutation = useMutation('teams:setAutoPaused' as any)
+  const recordFinishMutation = useMutation('teams:recordFinish' as any)
+  // Weather (multi-provider via Convex). User pref persisted in localStorage.
+  const [weatherProvider, setWeatherProvider] = useState<WeatherProviderId>(() => readPreferredProvider())
+  const [weatherDialogOpen, setWeatherDialogOpen] = useState(false)
+  const weather = useQuery(
+    'weather:getWeatherForEvent' as any,
+    event?._id ? { eventId: event._id, provider: weatherProvider } : 'skip',
+  ) as any
+  const fetchWeatherAction = useAction('weather:fetchWeather' as any)
+  // Trigger a refresh when cache is missing or stale (and we have lat/lng).
+  React.useEffect(() => {
+    if (!event?._id) return
+    if ((event as any)?.latitude == null || (event as any)?.longitude == null) return
+    if (weather === undefined) return
+    if (weather === null || weather?.stale) {
+      fetchWeatherAction({ eventId: event._id, provider: weatherProvider }).catch((err: any) =>
+        console.warn('weather fetch failed', err),
+      )
+    }
+  }, [
+    event?._id,
+    (event as any)?.latitude,
+    (event as any)?.longitude,
+    weather === null,
+    weather?.stale,
+    weatherProvider,
+  ])
+  const weatherProviderLabel = WEATHER_PROVIDERS.find((p) => p.id === weatherProvider)?.label ?? WEATHER_DEFAULT_PROVIDER
+  const setRunnerGroupMutation = useMutation('teams:setRunnerGroup' as any)
+  const enqueueGroupModeMutation = useMutation('teams:enqueueGroupMode' as any)
+  const cancelGroupModeEntryMutation = useMutation('teams:cancelGroupModeEntry' as any)
+  const stopActiveGroupModeMutation = useMutation('teams:stopActiveGroupMode' as any)
   const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const orderTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -107,6 +148,7 @@ function TeamPage() {
         color: teamData.color,
         ready: teamData.ready,
         autoPaused: teamData.autoPaused,
+        groupModeQueue: teamData.groupModeQueue,
         profileImage: teamData.profileImage,
         contactName: teamData.contactName,
         contactPhone: teamData.contactPhone,
@@ -123,6 +165,8 @@ function TeamPage() {
           status: r.status || 'ready',
           liveKmMin: r.liveKmMin ?? null,
           liveKmSec: r.liveKmSec ?? null,
+          gender: r.gender,
+          group: r.group,
         }))
         setRunners(augmented)
         const hasPersistedOrder = Array.isArray(teamData.order) && teamData.order.length > 0
@@ -163,17 +207,33 @@ function TeamPage() {
                 liveKmMin: r.liveKmMin ?? undefined,
                 liveKmSec: r.liveKmSec ?? undefined,
               },
-            }).catch((err: any) => console.error('upsert runner failed:', err))
+            }).catch((err: any) => {
+              const msg = err?.data?.message || err?.message || 'Erreur enregistrement coureur'
+              pushToast(msg, 'AlertTriangle')
+              // Rollback optimistic UI to prev snapshot
+              setRunners(prev as any)
+            })
           }
         }
         for (const id of prevIds) {
           if (!nextIds.has(id)) {
-            deleteRunnerMutation({ teamId: teamData._id, runnerLocalId: id as string }).catch((err: any) =>
-              console.error('delete runner failed:', err),
-            )
+            deleteRunnerMutation({ teamId: teamData._id, runnerLocalId: id as string }).catch((err: any) => {
+              const msg = err?.data?.message || err?.message || 'Suppression refusée'
+              pushToast(msg, 'AlertTriangle')
+              // Rollback: re-insert the deleted runner
+              setRunners(prev as any)
+            })
           }
         }
       }
+      // Auto-sync teamOrder: append newly added runner ids, drop deleted ones
+      setOrderPersist((prevOrder) => {
+        const nextIds = new Set(next.map((r: any) => r.id))
+        const kept = prevOrder.filter((id) => nextIds.has(id))
+        const newIds = next.map((r: any) => r.id).filter((id: string) => !kept.includes(id))
+        if (newIds.length === 0 && kept.length === prevOrder.length) return prevOrder
+        return [...kept, ...newIds]
+      })
       return next
     })
   }
@@ -289,6 +349,7 @@ function TeamPage() {
 
   return (
     <div className={`page ${readonly ? 'is-readonly' : ''}`}>
+      <TestModeBadge testMode={(event as any)?.testMode} />
       <div className="grid" style={{ gap: 14, maxWidth: 1280, margin: '0 auto' }}>
         <div className="card" style={{ padding: '8px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -348,7 +409,7 @@ function TeamPage() {
                 onClick={() => setActiveTab(t.id)}
                 className="tab"
               >
-                <span>{t.icon}</span>
+                <span className="team-tab-icon" aria-hidden="true">{t.icon}</span>
                 <span className="team-tab-label">{t.label}</span>
               </button>
             ))}
@@ -364,6 +425,8 @@ function TeamPage() {
             onContinue={() => setActiveTab('planning')}
             minLapSec={(event as any)?.minLapSec ?? 165}
             maxLapSec={(event as any)?.maxLapSec ?? 480}
+            maxRunnersPerTeam={(event as any)?.maxRunnersPerTeam ?? 10}
+            canDeleteRunner={(event as any)?.status === 'scheduled'}
           />
         )}
         {activeTab === 'planning' && (
@@ -375,6 +438,71 @@ function TeamPage() {
             schedule={schedule}
             onContinue={() => setActiveTab('live')}
             onBack={() => setActiveTab('setup')}
+            raceStartTime={event?.actualStart || null}
+            currentIdx={teamData?.currentIdx || 0}
+            currentRunnerLapsDone={(() => {
+              const cId = order[(teamData?.currentIdx || 0) % Math.max(1, order.length)]
+              if (!cId) return 0
+              const all = (lapsData || []).filter((l: any) => l.type !== 'position').slice().sort((a: any, b: any) => a.timestamp - b.timestamp)
+              let count = 0
+              for (let i = all.length - 1; i >= 0; i--) {
+                const l = all[i]
+                if (l.type === 'relay_manual' || l.type === 'relay_auto') break
+                if (l.runnerId === cId) count++
+              }
+              return count
+            })()}
+            currentRunnerExpectedLapMs={(() => {
+              const minLap = ((event as any)?.minLapSec ?? 165) * 1000
+              const maxLap = ((event as any)?.maxLapSec ?? 480) * 1000
+              const cR = (runners as any[]).find((r) => r.id === order[(teamData?.currentIdx || 0) % Math.max(1, order.length)])
+              if (!cR) return 0
+              if (cR.liveKmMin != null && cR.liveKmSec != null) {
+                const liveMs = (cR.liveKmMin * 60 + cR.liveKmSec) * 900 // = secPerKm * 0.9 sec
+                const liveLapMs = Math.round(liveMs)
+                if (liveLapMs >= minLap && liveLapMs <= maxLap) return liveLapMs
+              }
+              return (cR.kmMin * 60 + cR.kmSec) * 900
+            })()}
+            currentLapStartedAt={(() => {
+              if (!event?.actualStart) return null
+              const all = (lapsData || []).filter((l: any) => l.type !== 'position').slice().sort((a: any, b: any) => a.timestamp - b.timestamp)
+              return all.length ? all[all.length - 1].timestamp : event.actualStart
+            })()}
+            weatherForecast={weather?.data || null}
+            weatherUnavailable={null}
+            weatherProviderLabel={weatherProviderLabel}
+            weatherCityName={(event as any)?.cityName ?? null}
+            onOpenWeatherDialog={
+              event?._id && (event as any)?.latitude != null && (event as any)?.longitude != null
+                ? () => setWeatherDialogOpen(true)
+                : undefined
+            }
+            groupModeQueue={(team as any).groupModeQueue}
+            onSetRunnerGroup={(rid, group) => {
+              if (readonly || !teamData?._id) return
+              setRunnerGroupMutation({ teamId: teamData._id, runnerLocalId: rid, group }).catch((err: any) =>
+                console.error('setRunnerGroup:', err),
+              )
+            }}
+            onEnqueueGroupMode={(groupName, remainingRelays) => {
+              if (readonly || !teamData?._id) return
+              enqueueGroupModeMutation({ teamId: teamData._id, groupName, remainingRelays }).catch((err: any) =>
+                console.error('enqueueGroupMode:', err),
+              )
+            }}
+            onCancelGroupModeEntry={(index) => {
+              if (readonly || !teamData?._id) return
+              cancelGroupModeEntryMutation({ teamId: teamData._id, index }).catch((err: any) =>
+                console.error('cancelGroupModeEntry:', err),
+              )
+            }}
+            onStopActiveGroupMode={() => {
+              if (readonly || !teamData?._id) return
+              stopActiveGroupModeMutation({ teamId: teamData._id }).catch((err: any) =>
+                console.error('stopActiveGroupMode:', err),
+              )
+            }}
           />
         )}
         {activeTab === 'live' && (
@@ -422,6 +550,13 @@ function TeamPage() {
             }}
             replaceAutoWindowSec={(event as any)?.replaceAutoWindowSec ?? 180}
             minLapSec={(event as any)?.minLapSec ?? 165}
+            relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
+            scheduledEnd={(event as any)?.scheduledEnd ?? null}
+            teamFinishedAt={(teamData as any)?.finishedAt ?? null}
+            onRecordTeamFinish={async () => {
+              if (readonly || !teamData?._id) return
+              await recordFinishMutation({ teamId: teamData._id })
+            }}
             pushToast={pushToast}
             onSetAutoPaused={(paused) => {
               if (readonly || !teamData?._id) return
@@ -440,6 +575,7 @@ function TeamPage() {
             raceStarted={race.started}
             minLapSec={(event as any)?.minLapSec ?? 165}
             maxLapSec={(event as any)?.maxLapSec ?? 480}
+            relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
             ranking={ranking}
             setRanking={setRanking}
             onAddPosition={() => {}}
@@ -524,6 +660,23 @@ function TeamPage() {
           </button>
         </div>
       )}
+
+      {/* Weather source picker dialog */}
+      <WeatherSourceDialog
+        open={weatherDialogOpen}
+        onClose={() => setWeatherDialogOpen(false)}
+        eventId={event?._id ?? null}
+        currentProvider={weatherProvider}
+        onSelect={(id) => {
+          setWeatherProvider(id)
+          const r = writePreferredProvider(id)
+          if (!r.persisted) {
+            pushToast('Préférence non persistée sur ce navigateur', 'AlertTriangle')
+          } else {
+            pushToast(`Source météo : ${WEATHER_PROVIDERS.find((p) => p.id === id)?.label ?? id}`, 'Check')
+          }
+        }}
+      />
 
       {/* Toast notifications */}
       <div className="toast-stack">

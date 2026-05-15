@@ -1,5 +1,5 @@
 import { cronJobs } from 'convex/server'
-import { api } from './_generated/api'
+import { api, internal } from './_generated/api'
 
 const crons = cronJobs()
 
@@ -8,6 +8,13 @@ crons.interval(
   'auto lap tick',
   { seconds: 5 },
   api.laps.autoTick,
+)
+
+// Refresh weather forecast for all active events every 10 minutes (Met.no).
+crons.interval(
+  'weather refresh',
+  { minutes: 10 },
+  internal.weather.refreshAllActive,
 )
 
 export default crons

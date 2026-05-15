@@ -1,5 +1,6 @@
-import { v } from 'convex/values'
+import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import { TEST_MODE_LOCK_WINDOW_MS } from './lib/timings'
 
 // List all events
 export const list = query({
@@ -88,6 +89,25 @@ export const stopRace = mutation({
   },
 })
 
+// Permanently end the event (admin "Arrêter l'événement"). Sets actualEnd + status='finished'.
+// Per CTO #13: NO cascade on teams — captains must still record finish per team
+// (sportive rule: tour entamé compte). Idempotent.
+export const endRace = mutation({
+  args: { eventId: v.id('events') },
+  handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.eventId)
+    if (!event) throw new ConvexError({ code: 'EVENT_NOT_FOUND', message: 'Événement introuvable.' })
+    if ((event as any).actualEnd) return (event as any).actualEnd // idempotent
+    const actualEnd = Date.now()
+    await ctx.db.patch(args.eventId, {
+      status: 'finished',
+      actualEnd,
+      updatedAt: actualEnd,
+    })
+    return actualEnd
+  },
+})
+
 export const correctActualStart = mutation({
   args: { eventId: v.id('events'), actualStart: v.number() },
   handler: async (ctx, args) => {
@@ -101,13 +121,14 @@ export const correctActualStart = mutation({
 export const resetRace = mutation({
   args: { eventId: v.id('events') },
   handler: async (ctx, args) => {
-    // Reset event
+    // Reset event — clear actualStart + actualEnd + back to 'scheduled'
     await ctx.db.patch(args.eventId, {
       status: 'scheduled',
       actualStart: undefined,
+      actualEnd: undefined,
       updatedAt: Date.now(),
     })
-    // Delete all laps for teams of this event
+    // Delete all laps for teams + clear team race state (currentIdx, ready, finished, autoPaused, cooldown, group queue)
     const teams = await ctx.db
       .query('teams')
       .withIndex('by_event', (q) => q.eq('eventId', args.eventId))
@@ -118,7 +139,16 @@ export const resetRace = mutation({
         .withIndex('by_team', (q) => q.eq('teamId', team._id))
         .collect()
       for (const lap of laps) await ctx.db.delete(lap._id)
-      await ctx.db.patch(team._id, { currentIdx: 0, ready: false, updatedAt: Date.now() })
+      await ctx.db.patch(team._id, {
+        currentIdx: 0,
+        ready: false,
+        finishedAt: undefined,
+        finishedByLap: undefined,
+        autoPaused: undefined,
+        cronCooldownUntil: undefined,
+        groupModeQueue: undefined,
+        updatedAt: Date.now(),
+      })
     }
     // Delete all interruptions for this event
     const interruptions = await ctx.db
@@ -171,6 +201,104 @@ export const updateReplaceAutoWindow = mutation({
       replaceAutoWindowSec: Math.max(0, Math.round(args.seconds)),
       updatedAt: Date.now(),
     })
+  },
+})
+
+// Default value when event has no explicit setting.
+export const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
+export const DEFAULT_RELAY_TRANSITION_SEC = 5
+
+// Toggle test mode (fast timings for cron/auto-pass dev). Locked once race started
+// or scheduled start within TEST_MODE_LOCK_WINDOW_MS (10 min).
+export const setTestMode = mutation({
+  args: { eventId: v.id('events'), value: v.boolean() },
+  handler: async (ctx, args) => {
+    const event = await ctx.db.get(args.eventId)
+    if (!event) throw new ConvexError({ code: 'EVENT_NOT_FOUND', message: 'Événement introuvable.' })
+    if (event.status !== 'scheduled') {
+      throw new ConvexError({
+        code: 'TEST_MODE_LOCKED_RACE_STARTED',
+        message: 'Mode test verrouillé : la course est déjà démarrée ou terminée.',
+      })
+    }
+    if (event.scheduledStart && event.scheduledStart - Date.now() < TEST_MODE_LOCK_WINDOW_MS) {
+      throw new ConvexError({
+        code: 'TEST_MODE_LOCKED_NEAR_START',
+        message: 'Mode test verrouillé : la course démarre dans moins de 10 minutes.',
+      })
+    }
+    await ctx.db.patch(args.eventId, { testMode: args.value, updatedAt: Date.now() })
+    return args.value
+  },
+})
+
+// Set the relay transition penalty in seconds (used for delta calculations + future auto-pass).
+export const setRelayTransitionSec = mutation({
+  args: { eventId: v.id('events'), seconds: v.number() },
+  handler: async (ctx, args) => {
+    const seconds = Math.round(args.seconds)
+    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 60) {
+      throw new ConvexError({
+        code: 'INVALID_RELAY_TRANSITION',
+        message: 'Le temps de transition relai doit être entre 0 et 60 secondes.',
+      })
+    }
+    await ctx.db.patch(args.eventId, { relayTransitionSec: seconds, updatedAt: Date.now() })
+    return seconds
+  },
+})
+
+// Set max runners per team at event level. Refuses if any team would exceed.
+export const setMaxRunnersPerTeam = mutation({
+  args: { eventId: v.id('events'), value: v.number() },
+  handler: async (ctx, args) => {
+    const value = Math.max(1, Math.min(50, Math.round(args.value)))
+    const teams = await ctx.db
+      .query('teams')
+      .withIndex('by_event', (q) => q.eq('eventId', args.eventId))
+      .collect()
+    for (const team of teams) {
+      const runners = await ctx.db
+        .query('runners')
+        .withIndex('by_team', (q) => q.eq('teamId', team._id))
+        .collect()
+      const active = runners.filter((r: any) => r.status !== 'out').length
+      if (active > value) {
+        throw new ConvexError({
+          code: 'TEAM_CAPACITY_EXCEEDED',
+          teamName: team.name,
+          activeCount: active,
+          requested: value,
+          message: `Équipe "${team.name}" a ${active} coureurs actifs — réduire d'abord avant de baisser à ${value}.`,
+        })
+      }
+    }
+    await ctx.db.patch(args.eventId, { maxRunnersPerTeam: value, updatedAt: Date.now() })
+    return value
+  },
+})
+
+// Set event geolocation (lat/lng + city display name) for weather forecast.
+// Validation: lat -90..90, lng -180..180. ConvexError on invalid input.
+export const setLatLng = mutation({
+  args: {
+    eventId: v.id('events'),
+    latitude: v.optional(v.number()),
+    longitude: v.optional(v.number()),
+    cityName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    if (args.latitude !== undefined && (args.latitude < -90 || args.latitude > 90)) {
+      throw new ConvexError({ code: 'INVALID_LATITUDE', message: 'Latitude doit être entre -90 et 90.' })
+    }
+    if (args.longitude !== undefined && (args.longitude < -180 || args.longitude > 180)) {
+      throw new ConvexError({ code: 'INVALID_LONGITUDE', message: 'Longitude doit être entre -180 et 180.' })
+    }
+    const patch: Record<string, any> = { updatedAt: Date.now() }
+    if (args.latitude !== undefined) patch.latitude = args.latitude
+    if (args.longitude !== undefined) patch.longitude = args.longitude
+    if (args.cityName !== undefined) patch.cityName = args.cityName.trim().slice(0, 60) || undefined
+    await ctx.db.patch(args.eventId, patch)
   },
 })
 

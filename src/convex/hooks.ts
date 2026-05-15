@@ -1,8 +1,8 @@
-import { useMutation, useQuery } from 'convex/react'
+import { useAction, useMutation, useQuery } from 'convex/react'
 import convex from './client'
 
 // Re-export Convex hooks with our client
-export { useMutation, useQuery }
+export { useAction, useMutation, useQuery }
 
 // Helper to get the convex instance
 export const getConvex = () => convex

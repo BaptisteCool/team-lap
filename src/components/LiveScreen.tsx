@@ -30,6 +30,7 @@ interface Runner {
   plannedLaps: number
   liveKmMin?: number | null
   liveKmSec?: number | null
+  group?: string
 }
 
 interface Lap {
@@ -73,7 +74,7 @@ interface LiveScreenProps {
   ranking?: Ranking
   setRanking?: React.Dispatch<React.SetStateAction<Ranking>>
   onBack: () => void
-  team?: { name?: string; color?: string; ready?: boolean; autoPaused?: boolean }
+  team?: { name?: string; color?: string; ready?: boolean; autoPaused?: boolean; groupModeQueue?: Array<{ groupName: string; remainingRelays: number; status: 'active' | 'pending' }> }
   setTeamReady?: (ready: boolean) => void
   onRecordLap?: (change: boolean, runnerId: string) => Promise<{ docId?: any; lapId?: string } | unknown> | void
   onUndoLap?: (docId: string) => void
@@ -84,6 +85,13 @@ interface LiveScreenProps {
   replaceAutoWindowSec?: number
   minLapSec?: number
   maxLapSec?: number
+  // Relay handover penalty (sec, default 5) — marker freezes at line during this window
+  relayTransitionSec?: number
+  // Race finish: scheduledEnd (ms epoch) drives bouton "Fin de course" switch.
+  // team.finishedAt set → équipe terminée, all controls disabled.
+  scheduledEnd?: number | null
+  teamFinishedAt?: number | null
+  onRecordTeamFinish?: () => void | Promise<void>
   pushToast?: (text: string, icon?: string, action?: { label: string; fn: () => void }) => void
 }
 
@@ -108,6 +116,10 @@ export function LiveScreen({
   replaceAutoWindowSec,
   minLapSec = 165,
   maxLapSec = 480,
+  relayTransitionSec = 5,
+  scheduledEnd,
+  teamFinishedAt,
+  onRecordTeamFinish,
   pushToast,
 }: LiveScreenProps) {
   const [nowReal, setNowReal] = useState(Date.now())
@@ -155,7 +167,24 @@ export function LiveScreen({
   // DB-driven current runner (advances after manual / auto relay)
   const currentRunnerId = order[race.currentIdx % Math.max(1, order.length)]
   const currentRunner = getRunner(currentRunnerId)
-  const nIdx = nextActiveIdx(order, runners, race.currentIdx)
+  // Active group-mode entry — affects next runner computation if status='active'
+  const activeGroupEntry = team?.groupModeQueue && team.groupModeQueue.length > 0
+    ? team.groupModeQueue[0]
+    : null
+  const groupActive = activeGroupEntry?.status === 'active' ? activeGroupEntry : null
+  // Compute next runner: if group active and there is at least one other group member non-out → restrict
+  let nIdx = nextActiveIdx(order, runners, race.currentIdx)
+  if (groupActive) {
+    const groupMemberIdx = (() => {
+      for (let i = 1; i <= order.length; i++) {
+        const idx = (race.currentIdx + i) % order.length
+        const r = runners.find((x) => x.id === order[idx])
+        if (r && r.status !== 'out' && r.group === groupActive.groupName) return idx
+      }
+      return -1
+    })()
+    if (groupMemberIdx >= 0) nIdx = groupMemberIdx
+  }
   const nextRunner = getRunner(order[nIdx])
 
   const realLaps = race.laps.filter(l => l.type !== 'position')
@@ -360,7 +389,40 @@ export function LiveScreen({
                 <Avatar name={currentRunner.name} color={currentRunner.color} size={56} />
                 <div className="runner-meta">
                   <div className="role">Coureur en piste · {String(race.currentIdx + 1).padStart(2, '0')} / {order.length}</div>
-                  <div className="name">{currentRunner.name}</div>
+                  <div className="name" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span>{currentRunner.name}</span>
+                    {currentRunner.group && (
+                      <span
+                        className="badge"
+                        style={{
+                          fontSize: 10,
+                          padding: '2px 8px',
+                          background: 'oklch(0.86 0.20 135 / 0.18)',
+                          color: 'oklch(0.92 0.20 135)',
+                          border: '1px solid oklch(0.86 0.20 135 / 0.4)',
+                        }}
+                      >
+                        Grp {currentRunner.group}
+                      </span>
+                    )}
+                    {activeGroupEntry && (
+                      <span
+                        className="badge"
+                        style={{
+                          fontSize: 10,
+                          padding: '2px 8px',
+                          background: activeGroupEntry.status === 'active' ? 'oklch(0.78 0.18 80 / 0.22)' : 'var(--bg-2)',
+                          color: activeGroupEntry.status === 'active' ? 'oklch(0.92 0.16 80)' : 'var(--muted)',
+                          border: '1px solid ' + (activeGroupEntry.status === 'active' ? 'oklch(0.78 0.18 80 / 0.5)' : 'var(--border)'),
+                        }}
+                        title={activeGroupEntry.status === 'active'
+                          ? `Mode groupe ${activeGroupEntry.groupName} actif — ${activeGroupEntry.remainingRelays} relais restants`
+                          : `Mode groupe ${activeGroupEntry.groupName} en attente (le coureur en piste n'appartient pas au groupe)`}
+                      >
+                        {activeGroupEntry.status === 'active' ? '▶' : '⏸'} Mode {activeGroupEntry.groupName} · {activeGroupEntry.remainingRelays}t
+                      </span>
+                    )}
+                  </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
                     <StatusChip value={currentRunner.status} />
                     <EnergyBar value={currentRunner.energy} />
@@ -631,7 +693,28 @@ export function LiveScreen({
 
             {/* Controls */}
             <div className="controls">
-              {race.started && realLaps.length === 0 ? (
+              {teamFinishedAt ? (
+                <div
+                  style={{
+                    gridColumn: '1 / -1',
+                    padding: '14px 18px',
+                    borderRadius: 10,
+                    background: 'oklch(0.86 0.20 135 / 0.10)',
+                    border: '1px solid oklch(0.86 0.20 135 / 0.40)',
+                    color: 'oklch(0.92 0.20 135)',
+                    textAlign: 'center',
+                    fontWeight: 600,
+                  }}
+                >
+                  🏁 Équipe terminée à{' '}
+                  {new Date(teamFinishedAt).toLocaleTimeString('fr-FR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    timeZone: 'Europe/Paris',
+                  })}
+                </div>
+              ) : race.started && realLaps.length === 0 ? (
                 <button className="big-btn start" style={{ gridColumn: '1 / -1' }} onClick={() => recordLap(false)}>
                   <span className="label-top">Démarrage tardif de l'équipe</span>
                   <span className="label-main">Lancer l'équipe avec le passage de {currentRunner?.name || '—'}</span>
@@ -664,25 +747,72 @@ export function LiveScreen({
                           : `Tour validé · ${currentRunner?.name}. Calibre à la seconde près.`}
                     </span>
                   </button>
-                  <button
-                    className={`big-btn relay ${lapsRemainingInRelay > 0 && race.started ? 'is-warn' : ''}`}
-                    disabled={!canClick}
-                    onClick={() => recordLap(true)}
-                  >
-                    <span className="label-top">Relai → {nextRunner?.name || '—'}</span>
-                    <span className="label-main mono">
-                      {!race.started ? '—' : team?.autoPaused ? '⏸ PAUSE' : etaRelay > 0 ? `Estim. ${fmtLap(etaRelay)}` : 'maintenant'}
-                    </span>
-                    <span className="label-sub">
-                      {!race.started
-                        ? 'En attente du top départ'
-                        : (
-                          <>
-                            Reste <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{fractionalRemaining.toFixed(1).replace('.', ',')}</span> tour{fractionalRemaining >= 2 ? 's' : ''} pour {currentRunner?.name}.
-                          </>
+                  {scheduledEnd && Date.now() > scheduledEnd ? (
+                    <button
+                      className="big-btn relay"
+                      style={{
+                        background: 'oklch(0.72 0.21 25 / 0.18)',
+                        borderColor: 'oklch(0.72 0.21 25 / 0.5)',
+                        color: 'oklch(0.85 0.18 25)',
+                      }}
+                      onClick={async () => {
+                        if (!onRecordTeamFinish) return
+                        if (!window.confirm("Fin de course pour cette équipe ?\n\nLe coureur en piste a passé la ligne après l'heure de fin. Action irréversible.")) return
+                        try {
+                          await onRecordTeamFinish()
+                          pushToast?.('🏁 Équipe terminée', 'Flag')
+                        } catch (err: any) {
+                          const msg = err?.data?.message || err?.message || 'Erreur'
+                          pushToast?.(msg, 'AlertTriangle')
+                        }
+                      }}
+                    >
+                      <span className="label-top">🏁 Fin de course</span>
+                      <span className="label-main mono">Arrêter cette équipe</span>
+                      <span className="label-sub">
+                        Le coureur a passé la ligne après l'heure de fin. Click pour valider.
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      className={`big-btn relay ${lapsRemainingInRelay > 0 && race.started ? 'is-warn' : ''}`}
+                      disabled={!canClick}
+                      onClick={() => recordLap(true)}
+                    >
+                      <span className="label-top">
+                        Relai → {nextRunner?.name || '—'}
+                        {nextRunner?.status === 'uncertain' && (
+                          <span
+                            className="badge"
+                            style={{
+                              marginLeft: 6,
+                              fontSize: 10,
+                              background: 'oklch(0.82 0.17 70 / 0.20)',
+                              color: 'oklch(0.92 0.17 70)',
+                              border: '1px solid oklch(0.82 0.17 70 / 0.55)',
+                              padding: '1px 5px',
+                              borderRadius: 4,
+                            }}
+                            title="Coureur incertain"
+                          >
+                            ? Incertain
+                          </span>
                         )}
-                    </span>
-                  </button>
+                      </span>
+                      <span className="label-main mono">
+                        {!race.started ? '—' : team?.autoPaused ? '⏸ PAUSE' : etaRelay > 0 ? `Estim. ${fmtLap(etaRelay)}` : 'maintenant'}
+                      </span>
+                      <span className="label-sub">
+                        {!race.started
+                          ? 'En attente du top départ'
+                          : (
+                            <>
+                              Reste <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{fractionalRemaining.toFixed(1).replace('.', ',')}</span> tour{fractionalRemaining >= 2 ? 's' : ''} pour {currentRunner?.name}.
+                            </>
+                          )}
+                      </span>
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -794,13 +924,18 @@ export function LiveScreen({
               <div className="live-map">
                 <GpxMap
                   showLabel={false}
-                  progress={
-                    race.started && expectedLapMs > 0
-                      ? team?.autoPaused
-                        ? 0.92 // freeze marker just before finish line while paused
-                        : (effCurrentLapMs / expectedLapMs) % 1
-                      : undefined
-                  }
+                  progress={(() => {
+                    if (!race.started || expectedLapMs <= 0) return undefined
+                    if (team?.autoPaused) return 0.92
+                    // Relay handover freeze: marker stays at line for relayTransitionSec
+                    // after a relay_* lap (handover between runners).
+                    const lastIsRelay =
+                      effLastLap && (effLastLap.type === 'relay_manual' || effLastLap.type === 'relay_auto')
+                    const offsetMs = lastIsRelay ? relayTransitionSec * 1000 : 0
+                    if (offsetMs > 0 && effCurrentLapMs < offsetMs) return 0
+                    const progressMs = Math.max(0, effCurrentLapMs - offsetMs)
+                    return (progressMs / expectedLapMs) % 1
+                  })()}
                 />
               </div>
               <div className="stat-row" style={{ marginTop: 12 }}>

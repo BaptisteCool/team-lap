@@ -19,7 +19,7 @@ function AdminPage() {
   const event = useQuery('events:getBySlug' as any, { slug: '24h-brette-les-pins-2026' })
   
   // Get teams from Convex
-  const teams = useQuery('teams:getTeams' as any, { eventId: event?._id || 'placeholder' })
+  const teams = useQuery('teams:getTeams' as any, event?._id ? { eventId: event._id } : 'skip')
   
   // Interruptions from Convex
   const interruptions = useQuery(
@@ -41,6 +41,11 @@ function AdminPage() {
   const updatePasswordMutation = useMutation('events:updateAdminPassword' as any)
   const updateReplaceAutoWindowMutation = useMutation('events:updateReplaceAutoWindow' as any)
   const updateLapBoundsMutation = useMutation('events:updateLapBounds' as any)
+  const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
+  const setLatLngMutation = useMutation('events:setLatLng' as any)
+  const setRelayTransitionSecMutation = useMutation('events:setRelayTransitionSec' as any)
+  const setTestModeMutation = useMutation('events:setTestMode' as any)
+  const endRaceMutation = useMutation('events:endRace' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
   const endItrMutation = useMutation('events:endInterruption' as any)
   const updateItrMutation = useMutation('events:updateInterruption' as any)
@@ -360,6 +365,53 @@ function AdminPage() {
         correctActualStart={correctActualStart}
         resetRace={resetRace}
         pushToast={pushToast}
+        maxRunnersPerTeam={(event as any)?.maxRunnersPerTeam ?? 10}
+        onSetMaxRunnersPerTeam={async (value: number) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setMaxRunnersPerTeamMutation({ eventId: event._id, value })
+        }}
+        latitude={(event as any)?.latitude ?? null}
+        longitude={(event as any)?.longitude ?? null}
+        cityName={(event as any)?.cityName ?? null}
+        onSetLatLng={async (lat: number | null, lng: number | null, city?: string | null) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setLatLngMutation({
+            eventId: event._id,
+            latitude: lat ?? undefined,
+            longitude: lng ?? undefined,
+            cityName: city ?? undefined,
+          })
+        }}
+        relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
+        onSetRelayTransitionSec={async (seconds: number) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setRelayTransitionSecMutation({ eventId: event._id, seconds })
+        }}
+        testMode={(event as any)?.testMode ?? false}
+        onSetTestMode={async (value: boolean) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setTestModeMutation({ eventId: event._id, value })
+        }}
+        testModeLocked={(() => {
+          const ev = event as any
+          if (!ev) return false
+          if (ev.status !== 'scheduled') return true
+          if (ev.scheduledStart && ev.scheduledStart - Date.now() < 10 * 60 * 1000) return true
+          return false
+        })()}
+        testModeLockReason={(() => {
+          const ev = event as any
+          if (!ev) return undefined
+          if (ev.status !== 'scheduled') return 'Course démarrée ou terminée'
+          if (ev.scheduledStart && ev.scheduledStart - Date.now() < 10 * 60 * 1000)
+            return 'Départ dans moins de 10 min'
+          return undefined
+        })()}
+        actualEnd={(event as any)?.actualEnd ?? null}
+        onEndRace={async () => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await endRaceMutation({ eventId: event._id })
+        }}
       />
       {/* Toast notifications */}
       <div className="toast-stack">

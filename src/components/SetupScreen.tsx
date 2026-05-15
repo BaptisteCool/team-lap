@@ -41,9 +41,13 @@ interface SetupScreenProps {
   onContinue: () => void
   minLapSec?: number
   maxLapSec?: number
+  // Event-level capacity (uniform across all teams of the event). Default 10.
+  maxRunnersPerTeam?: number
+  // False once race started → delete is locked (integrity of laps / currentIdx / ranking)
+  canDeleteRunner?: boolean
 }
 
-export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, minLapSec = 165, maxLapSec = 480 }: SetupScreenProps) {
+export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, minLapSec = 165, maxLapSec = 480, maxRunnersPerTeam, canDeleteRunner = true }: SetupScreenProps) {
   const [editPaceFor, setEditPaceFor] = React.useState<{ runnerId: string; min: number; sec: number } | null>(null)
   const [editPlannedFor, setEditPlannedFor] = React.useState<string | null>(null)
   const [addRunnerOpen, setAddRunnerOpen] = React.useState(false)
@@ -54,8 +58,11 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
   const [addPlanned, setAddPlanned] = React.useState(4)
   // Compact mm:ss formatter for bounds display (no centiseconds)
   const fmtMmSs = (ms: number) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')}`
-  const maxRunners = team?.maxRunners || 30
-  const atCap = runners.length >= maxRunners
+  // Source of truth: event.maxRunnersPerTeam. Fallback team.maxRunners (legacy) then 10.
+  const maxRunners = maxRunnersPerTeam ?? team?.maxRunners ?? 10
+  // Capacity counts active + uncertain (excludes 'out' / abandon)
+  const activeCount = runners.filter(r => r.status !== 'out').length
+  const atCap = activeCount >= maxRunners
 
   function updateRunner(id: string, patch: Partial<Runner>) {
     setRunners(rs => rs.map(r => (r.id === id ? { ...r, ...patch } : r)))
@@ -94,6 +101,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
   }
 
   function removeRunner(id: string) {
+    if (!canDeleteRunner) return
     const r = runners.find(x => x.id === id)
     const name = r && r.name ? r.name : 'ce coureur'
     if (
@@ -301,7 +309,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
                       fontSize: 14,
                     }}
                   >
-                    {team.maxRunners || '—'}
+                    {maxRunners}
                   </div>
                 </div>
               </div>
@@ -342,13 +350,13 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
         <div className="card" style={{ alignSelf: 'start' }}>
           <div className="card-head">
             <span>👥</span>
-            <h3>Coureurs · {runners.length} / {maxRunners}</h3>
+            <h3>Coureurs · {activeCount} / {maxRunners} actifs</h3>
             <button
               className="btn primary"
               style={{ marginLeft: 'auto' }}
               onClick={openAddRunner}
               disabled={atCap}
-              title={atCap ? `Maximum ${maxRunners} coureurs atteint` : undefined}
+              title={atCap ? `Capacité atteinte (${activeCount}/${maxRunners} actifs)` : undefined}
             >
               ➕ Ajouter
             </button>
@@ -357,7 +365,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
             {runners.length === 0 && <div className="empty">Ajoutez au moins 2 coureurs pour démarrer.</div>}
             {atCap && (
               <div className="hint" style={{ color: 'var(--warn)', marginBottom: 8 }}>
-                Maximum de {maxRunners} coureurs atteint (réglé en admin).
+                Capacité atteinte ({activeCount}/{maxRunners} actifs). Marquez un coureur en abandon pour libérer un slot.
               </div>
             )}
             <div className="grid" style={{ gap: 10 }}>
@@ -394,7 +402,13 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
                         placeholder="Pseudo"
                         style={{ fontSize: 15, fontWeight: 500 }}
                       />
-                      <button className="btn ghost icon" onClick={() => removeRunner(r.id)} title="Supprimer">
+                      <button
+                        className="btn ghost icon"
+                        onClick={() => removeRunner(r.id)}
+                        disabled={!canDeleteRunner}
+                        title={canDeleteRunner ? 'Supprimer' : 'Suppression impossible : la course a démarré. Marquez en abandon à la place.'}
+                        style={!canDeleteRunner ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                      >
                         🗑
                       </button>
                     </div>

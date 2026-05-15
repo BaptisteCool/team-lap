@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
+import { TestModeBadge } from './TestModeBadge';
 import {
   SUPER_ADMIN_PIN,
   TEAM_CATEGORIES,
@@ -17,7 +18,8 @@ interface AdminState {
 interface TeamInfo {
   id: string
   name: string
-  maxRunners: number
+  // DEPRECATED per-team capacity (event.maxRunnersPerTeam is source of truth)
+  maxRunners?: number
   pin: string
   category: string
   goalLaps: number
@@ -49,6 +51,26 @@ interface AdminScreenProps {
   correctActualStart: (isoString: string) => void
   resetRace: () => void
   pushToast: (text: string, icon?: string) => void
+  // Event-level "max runners per team" (uniform across all teams). Default 10.
+  maxRunnersPerTeam?: number
+  onSetMaxRunnersPerTeam?: (value: number) => Promise<void> | void
+  // Geo for weather (Met.no)
+  latitude?: number | null
+  longitude?: number | null
+  cityName?: string | null
+  onSetLatLng?: (lat: number | null, lng: number | null, cityName?: string | null) => Promise<void> | void
+  // Relay transition penalty (seconds). Default 7. Range 0-60.
+  relayTransitionSec?: number
+  onSetRelayTransitionSec?: (seconds: number) => Promise<void> | void
+  // Test mode (fast timings for QA)
+  testMode?: boolean
+  onSetTestMode?: (value: boolean) => Promise<void> | void
+  // Lock state pour le toggle (true = verrouillé, ex: course démarrée ou < 10min avant départ)
+  testModeLocked?: boolean
+  testModeLockReason?: string
+  // End race (admin) — sets event.actualEnd + status='finished'
+  actualEnd?: number | null
+  onEndRace?: () => Promise<void> | void
 }
 
 export function AdminScreen({
@@ -64,8 +86,24 @@ export function AdminScreen({
   correctActualStart,
   resetRace,
   pushToast,
+  maxRunnersPerTeam,
+  onSetMaxRunnersPerTeam,
+  latitude,
+  longitude,
+  cityName,
+  onSetLatLng,
+  relayTransitionSec,
+  onSetRelayTransitionSec,
+  testMode,
+  onSetTestMode,
+  testModeLocked,
+  testModeLockReason,
+  actualEnd,
+  onEndRace,
 }: AdminScreenProps) {
+  const evRelayTransition = relayTransitionSec ?? 5
   const navigate = useNavigate()
+  const evMaxRunners = maxRunnersPerTeam ?? 10
   const schedule = admin.schedule || { startISO: '', endISO: '' }
   const race = admin.race || { started: false, startTime: null }
   const interruptions = Array.isArray(admin.interruptions) ? admin.interruptions : []
@@ -165,8 +203,9 @@ export function AdminScreen({
   }
 
   return (
-    <div className="page">
-      <div className="grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: 18 }}>
+    <div className="page admin-page">
+      <TestModeBadge testMode={testMode} />
+      <div className="grid admin-main-grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: 18 }}>
         {/* LEFT — Schedule + control + interruptions */}
         <div className="grid" style={{ gap: 18, alignContent: 'start' }}>
           {/* Schedule */}
@@ -226,7 +265,7 @@ export function AdminScreen({
 
               <div className="grid" style={{ gap: 10 }}>
                 <span className="field-label">Lancer la course (globale, toutes équipes)</span>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <div className="race-controls" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button className="btn primary" onClick={startRaceNow} disabled={race.started}>
                     🚀 Lancer maintenant
                   </button>
@@ -237,6 +276,38 @@ export function AdminScreen({
                     <button className="btn danger" onClick={stopRace}>
                       ⏹ Stopper
                     </button>
+                  )}
+                  {race.started && !actualEnd && onEndRace && (
+                    <button
+                      className="btn danger"
+                      onClick={async () => {
+                        if (!window.confirm("Arrêter définitivement l'événement ?\n\nLes équipes pas encore terminées garderont la possibilité de cliquer 'Fin de course' pour leur tour entamé. Action irréversible.")) return
+                        try {
+                          await onEndRace()
+                          pushToast(`🏁 Événement arrêté à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Paris' })}`, 'Flag')
+                        } catch (err: any) {
+                          const msg = err?.data?.message || err?.message || 'Erreur'
+                          pushToast(msg, 'AlertTriangle')
+                        }
+                      }}
+                      title="Marque l'event terminé (status=finished, actualEnd=now). Cron auto-pass arrêté."
+                    >
+                      🏁 Arrêter l'événement
+                    </button>
+                  )}
+                  {actualEnd && (
+                    <span
+                      className="badge"
+                      style={{
+                        padding: '6px 10px',
+                        background: 'oklch(0.86 0.20 135 / 0.18)',
+                        color: 'oklch(0.92 0.20 135)',
+                        border: '1px solid oklch(0.86 0.20 135 / 0.5)',
+                        fontSize: 13,
+                      }}
+                    >
+                      🏁 Terminé à {new Date(actualEnd).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Europe/Paris' })}
+                    </span>
                   )}
                   {(race.startTime || totalLaps > 0) && resetRace && (
                     <button className="btn ghost" onClick={resetRace} title="Effacer le départ, les tours et les interruptions">
@@ -605,6 +676,197 @@ export function AdminScreen({
                   165..480s · course
                 </button>
               </div>
+              <hr className="sep" style={{ margin: '4px 0' }} />
+              <div className="hint">
+                Nombre max de coureurs par équipe (uniforme pour toutes les équipes de l'event). Les coureurs en abandon ne comptent pas.
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                <div className="field" style={{ maxWidth: 220 }}>
+                  <span className="field-label">Max coureurs / équipe</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="50"
+                    className="mono"
+                    defaultValue={evMaxRunners}
+                    onBlur={async (e) => {
+                      const v = Math.max(1, Math.min(50, +e.target.value || 1))
+                      if (v === evMaxRunners) return
+                      try {
+                        await onSetMaxRunnersPerTeam?.(v)
+                        pushToast(`Max coureurs/équipe → ${v}`, 'Check')
+                      } catch (err: any) {
+                        // ConvexError data carries human-readable .message; fallback to native message string
+                        const msg = err?.data?.message || err?.message || 'Erreur capacité'
+                        pushToast(msg, 'AlertTriangle')
+                        e.target.value = String(evMaxRunners)
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+                <div className="field" style={{ maxWidth: 220 }}>
+                  <span className="field-label">Transition relai (sec)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="60"
+                    className="mono"
+                    defaultValue={evRelayTransition}
+                    title="Pénalité de temps ajoutée au tour qui suit un relai (handover entre coureurs)"
+                    onBlur={async (e) => {
+                      const v = Math.max(0, Math.min(60, Math.round(+e.target.value || 0)))
+                      if (v === evRelayTransition) return
+                      try {
+                        await onSetRelayTransitionSec?.(v)
+                        pushToast(`Transition relai → ${v}s`, 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                        e.target.value = String(evRelayTransition)
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+              </div>
+              <hr className="sep" style={{ margin: '4px 0' }} />
+              <div className="hint">
+                Mode test : active des timings raccourcis (5s minLap, 30s maxLap, 3s replaceAuto, 2s relayTransition) pour tester la logique cron auto-pass + relai en quelques secondes. Verrouillé une fois la course démarrée ou à moins de 10 min du départ.
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <label
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: testModeLocked ? 'not-allowed' : 'pointer',
+                    opacity: testModeLocked ? 0.5 : 1,
+                  }}
+                  title={testModeLocked ? testModeLockReason || 'Verrouillé' : 'Activer/désactiver le mode test'}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!testMode}
+                    disabled={testModeLocked}
+                    onChange={async (e) => {
+                      const next = e.target.checked
+                      try {
+                        await onSetTestMode?.(next)
+                        pushToast(next ? 'Mode test activé ⚠' : 'Mode test désactivé', 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                        e.target.checked = !next
+                      }
+                    }}
+                  />
+                  <span style={{ fontSize: 13, fontWeight: 500 }}>Mode test (timings raccourcis)</span>
+                  {testMode && (
+                    <span
+                      className="badge"
+                      style={{
+                        fontSize: 10,
+                        padding: '2px 6px',
+                        background: 'oklch(0.72 0.21 25 / 0.18)',
+                        color: 'oklch(0.85 0.18 25)',
+                        border: '1px solid oklch(0.72 0.21 25 / 0.5)',
+                      }}
+                    >
+                      ACTIF
+                    </span>
+                  )}
+                </label>
+                {testModeLocked && (
+                  <span className="hint" style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    🔒 {testModeLockReason}
+                  </span>
+                )}
+              </div>
+              <hr className="sep" style={{ margin: '4px 0' }} />
+              <div className="hint">
+                Géolocalisation event (ville + lat/lng). Active la météo horaire dans le planning des passages (Met.no). Vide → météo masquée.
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <div className="field" style={{ flex: '1 1 200px', maxWidth: 280 }}>
+                  <span className="field-label">Ville (affichée)</span>
+                  <input
+                    type="text"
+                    defaultValue={cityName ?? ''}
+                    placeholder="Brette les Pins"
+                    maxLength={60}
+                    onBlur={async (e) => {
+                      const raw = e.target.value.trim()
+                      if (raw === (cityName ?? '')) return
+                      try {
+                        await onSetLatLng?.(latitude ?? null, longitude ?? null, raw || null)
+                        pushToast(raw ? `Ville → ${raw}` : 'Ville effacée', 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                      }
+                    }}
+                  />
+                </div>
+                <div className="field" style={{ maxWidth: 160 }}>
+                  <span className="field-label">Latitude</span>
+                  <input
+                    type="number"
+                    step="any"
+                    min="-90"
+                    max="90"
+                    className="mono"
+                    defaultValue={latitude ?? ''}
+                    placeholder="47.7547"
+                    onBlur={async (e) => {
+                      const raw = e.target.value.trim()
+                      const lat = raw === '' ? null : Number(raw)
+                      if (lat !== null && (Number.isNaN(lat) || lat < -90 || lat > 90)) {
+                        pushToast('Latitude invalide (-90..90)', 'AlertTriangle')
+                        e.target.value = latitude != null ? String(latitude) : ''
+                        return
+                      }
+                      try {
+                        await onSetLatLng?.(lat, longitude ?? null, cityName ?? null)
+                        pushToast('Latitude enregistrée', 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+                <div className="field" style={{ maxWidth: 160 }}>
+                  <span className="field-label">Longitude</span>
+                  <input
+                    type="number"
+                    step="any"
+                    min="-180"
+                    max="180"
+                    className="mono"
+                    defaultValue={longitude ?? ''}
+                    placeholder="0.3247"
+                    onBlur={async (e) => {
+                      const raw = e.target.value.trim()
+                      const lng = raw === '' ? null : Number(raw)
+                      if (lng !== null && (Number.isNaN(lng) || lng < -180 || lng > 180)) {
+                        pushToast('Longitude invalide (-180..180)', 'AlertTriangle')
+                        e.target.value = longitude != null ? String(longitude) : ''
+                        return
+                      }
+                      try {
+                        await onSetLatLng?.(latitude ?? null, lng, cityName ?? null)
+                        pushToast('Longitude enregistrée', 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -787,7 +1049,7 @@ export function AdminScreen({
                       🗑
                     </button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                     <div className="field">
                       <span className="field-label">Catégorie</span>
                       <select value={t.info.category || 'Mixte'} onChange={e => updateTeamInfo(t.info.id, { category: e.target.value })}>
@@ -795,17 +1057,6 @@ export function AdminScreen({
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
-                    </div>
-                    <div className="field">
-                      <span className="field-label">Max coureurs</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max="30"
-                        className="mono"
-                        value={t.info.maxRunners || 6}
-                        onChange={e => updateTeamInfo(t.info.id, { maxRunners: Math.max(1, +e.target.value || 1) })}
-                      />
                     </div>
                     <div className="field">
                       <span className="field-label">Objectif tours (auto)</span>
@@ -931,7 +1182,7 @@ export function AdminScreen({
                     </div>
                   </div>
                   <div className="hint" style={{ marginTop: 8, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    <span>{(t.runners || []).length} / {t.info.maxRunners || 6} coureur(s)</span>
+                    <span>{((t.runners || []).filter((r: any) => r.status !== 'out')).length} / {evMaxRunners} actifs</span>
                     <span>{(t.laps || []).length} tour(s) validés</span>
                     {t.info.contactName && (
                       <span>

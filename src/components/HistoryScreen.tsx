@@ -1,5 +1,6 @@
-import React, { useRef, useState } from 'react'
+import React, { useMemo, useRef, useState } from 'react'
 import { ENERGY_LEVELS, fmtClock, fmtLap, fmtPace, isAutoType, isRelayType, kmPaceToLapMs, toLocalDatetime } from '../lib/race-data'
+import { computeLapExpectedMs, computeTeamDelta, deltaToneColor, formatSignedDuration, getDeltaTone } from '../lib/race-calculations'
 
 interface Runner {
   id: string
@@ -59,6 +60,8 @@ interface HistoryScreenProps {
   onAddBulkRelay?: (payload: { runnerId: string; lapTimeMs: number; anchorMs: number; anchorKind: 'start' | 'end'; nbLaps: number; approximate: boolean }) => void
   minLapSec?: number
   maxLapSec?: number
+  // Relay transition penalty (sec, default 7) — applied to expected times for relay laps
+  relayTransitionSec?: number
 }
 
 const LAP_PAGE_STEP = 10
@@ -88,6 +91,7 @@ export function HistoryScreen({
   onAddBulkRelay,
   minLapSec = 165,
   maxLapSec = 480,
+  relayTransitionSec = 5,
 }: HistoryScreenProps) {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [formMode, setFormMode] = useState<null | { kind: 'edit' | 'addAbove' | 'addBelow'; lap: Lap }>(null)
@@ -103,7 +107,25 @@ export function HistoryScreen({
   void onEditLapRunner
   void runnersFull
 
-  const sortedLaps = [...laps].sort((a, b) => b.timestamp - a.timestamp)
+  const [filterRunnerId, setFilterRunnerId] = useState<string | null>(null)
+  // Team delta vs prévisionnel (toujours global, pas affecté par filtre coureur)
+  const teamDelta = useMemo(
+    () => computeTeamDelta(laps as any, runners as any, relayTransitionSec),
+    [laps, runners, relayTransitionSec],
+  )
+  const teamDeltaTone = getDeltaTone(teamDelta.deltaMs)
+  const teamDeltaColor = deltaToneColor(teamDeltaTone)
+  const lastDeltaTone = teamDelta.lastLapDeltaMs == null ? 'neutral' : getDeltaTone(teamDelta.lastLapDeltaMs)
+  const lastDeltaColor = deltaToneColor(lastDeltaTone)
+  // Auto-fallback if filtered runner gets deleted while filter active
+  React.useEffect(() => {
+    if (filterRunnerId && !runners.find((r) => r.id === filterRunnerId)) {
+      setFilterRunnerId(null)
+    }
+  }, [filterRunnerId, runners])
+  const sortedLaps = [...laps]
+    .filter((l) => !filterRunnerId || l.runnerId === filterRunnerId)
+    .sort((a, b) => b.timestamp - a.timestamp)
   const [pageLimit, setPageLimit] = useState(LAP_PAGE_STEP)
 
   const getRunner = (id: string) => runners.find((r) => r.id === id)
@@ -308,9 +330,38 @@ export function HistoryScreen({
       )}
 
       <div className="card">
-        <div className="card-head">
+        <div className="card-head" style={{ flexWrap: 'wrap', gap: 8 }}>
           <span>📊</span>
           <h3>Statistiques</h3>
+          <select
+            value={filterRunnerId ?? ''}
+            onChange={(e) => setFilterRunnerId(e.target.value || null)}
+            title="Filtrer par coureur (s'applique à l'historique)"
+            style={{
+              marginLeft: 'auto',
+              padding: '4px 8px',
+              fontSize: 13,
+              background: 'var(--bg-2)',
+              color: 'var(--text)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+            }}
+          >
+            <option value="">Tous les coureurs</option>
+            {runners.map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+          {filterRunnerId && (
+            <button
+              className="btn ghost"
+              style={{ fontSize: 12, padding: '3px 8px' }}
+              onClick={() => setFilterRunnerId(null)}
+              title="Réinitialiser le filtre"
+            >
+              ✕
+            </button>
+          )}
         </div>
         <div className="card-body">
           <div className="stat-row">
@@ -337,17 +388,30 @@ export function HistoryScreen({
               </div>
               {bestLap && <div className="hint">{getRunner(bestLap.runnerId)?.name || '—'}</div>}
             </div>
+            <div className="stat">
+              <div className="stat-label" title={`Cumul équipe vs prévisionnel (allure cible + ${relayTransitionSec}s/relai)`}>
+                Avance / Retard
+              </div>
+              <div className="stat-value mono" style={{ color: teamDeltaColor }}>
+                {teamDelta.lapsCounted === 0 ? '—' : formatSignedDuration(teamDelta.deltaMs)}
+              </div>
+              {teamDelta.lastLapDeltaMs != null && (
+                <div className="hint" style={{ color: lastDeltaColor }}>
+                  Dernier {formatSignedDuration(teamDelta.lastLapDeltaMs)}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
       <div className="card">
-        <div className="card-head">
+        <div className="card-head" style={{ flexWrap: 'wrap', gap: 8 }}>
           <span>📜</span>
-          <h3>Historique des tours · {sortedLaps.length}</h3>
+          <h3>Historique{filterRunnerId ? ` · ${runners.find((r) => r.id === filterRunnerId)?.name || '—'}` : ''}</h3>
           {onAddBulkRelay && (
             <button
-              className="btn primary"
+              className="btn primary hide-on-mobile"
               style={{ marginLeft: 'auto', fontSize: 13 }}
               onClick={() => setBulkOpen(true)}
               title="Ajouter ou recaler tout un relai d'un coup (rattrapage)"
@@ -358,7 +422,11 @@ export function HistoryScreen({
         </div>
         <div className="card-body">
           {sortedLaps.length === 0 ? (
-            <div className="empty">Aucun tour pour l'instant. Le premier passage apparaîtra ici.</div>
+            <div className="empty">
+              {filterRunnerId
+                ? `Aucun tour enregistré pour ${runners.find((r) => r.id === filterRunnerId)?.name || 'ce coureur'}.`
+                : "Aucun tour pour l'instant. Le premier passage apparaîtra ici."}
+            </div>
           ) : (
             <div className="laps">
               {sortedLaps.slice(0, pageLimit).map((l) => {
@@ -395,6 +463,12 @@ export function HistoryScreen({
                 const isAbnormal = expectedMs > 0 && l.lapTime > expectedMs * 2
                 const badge = TYPE_BADGE[l.type] || TYPE_BADGE.checkpoint_manual
                 const plusMinus = lapBadge[l._id || l.id]
+                // Per-row delta — affiché uniquement pour tours manuels (auto = expected, delta=0 inutile)
+                const isManual = l.type === 'checkpoint_manual' || l.type === 'relay_manual'
+                const lapExpected = computeLapExpectedMs(l as any, r as any, relayTransitionSec)
+                const lapDelta = isManual && lapExpected ? l.lapTime - lapExpected : null
+                const lapDeltaTone = lapDelta != null ? getDeltaTone(lapDelta) : 'neutral'
+                const lapDeltaColor = deltaToneColor(lapDeltaTone)
                 return (
                   <div
                     key={l._id || l.id}
@@ -447,6 +521,31 @@ export function HistoryScreen({
                       <span className="lap-val-pace pace mono" data-kind="pace">{fmtPace(l.lapTime)}</span>
                       <span className="lap-val-paris mono" data-kind="paris" style={{ fontSize: 12, color: 'var(--text-2)' }}>🕒 {fmtParisHMS(l.timestamp)}</span>
                       <span className="lap-val-race mono" data-kind="race" style={{ fontSize: 12, color: 'var(--muted)' }}>T+{fmtRaceTime(l.timestamp)}</span>
+                      {lapDelta != null ? (
+                        <span
+                          className="mono"
+                          style={{
+                            fontSize: 12,
+                            color: lapDeltaColor,
+                            fontWeight: 600,
+                            minWidth: 56,
+                            textAlign: 'right',
+                          }}
+                          title={`Cible : ${fmtLap(lapExpected!)} · Réel : ${fmtLap(l.lapTime)}`}
+                        >
+                          {formatSignedDuration(lapDelta)}
+                        </span>
+                      ) : (
+                        !isManual && (
+                          <span
+                            className="mono"
+                            style={{ fontSize: 12, color: 'var(--muted)', opacity: 0.4, minWidth: 56, textAlign: 'right' }}
+                            title="Tour auto — pas de delta calculé"
+                          >
+                            —
+                          </span>
+                        )
+                      )}
                     </span>
                     <div style={{ position: 'relative' }}>
                       <button
