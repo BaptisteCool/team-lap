@@ -714,11 +714,11 @@ export function LiveScreen({
                     timeZone: 'Europe/Paris',
                   })}
                 </div>
-              ) : race.started && realLaps.length === 0 ? (
+              ) : race.started && realLaps.length === 0 && !team?.ready ? (
                 <button className="big-btn start" style={{ gridColumn: '1 / -1' }} onClick={() => recordLap(false)}>
                   <span className="label-top">Démarrage tardif de l'équipe</span>
                   <span className="label-main">Lancer l'équipe avec le passage de {currentRunner?.name || '—'}</span>
-                  <span className="label-sub">Premier passage validé. Les boutons Top / Relais apparaissent ensuite.</span>
+                  <span className="label-sub">Équipe pas marquée prête au top départ. Click pour valider le 1er passage et démarrer le tracking.</span>
                 </button>
               ) : (
                 <>
