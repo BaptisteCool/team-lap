@@ -14,8 +14,10 @@ interface WeatherSummaryBannerProps {
   unavailable?: { reason: string } | null
   // When provided, banner becomes clickable to open source picker dialog.
   onClick?: () => void
-  // Provider label shown inline (e.g. "Open-Meteo"). Optional.
+  // Provider label shown inline (e.g. "Met.no"). Optional.
   providerLabel?: string
+  // City name shown as a leading chip ("Brette les Pins · Prochaines 6h …"). Optional.
+  cityName?: string | null
 }
 
 // Banner "Prochaines 6h : X°C en moyenne, pluie vers HHh"
@@ -25,6 +27,7 @@ export function WeatherSummaryBanner({
   unavailable,
   onClick,
   providerLabel,
+  cityName,
 }: WeatherSummaryBannerProps) {
   const interactive = !!onClick
   if (unavailable) {
@@ -108,6 +111,9 @@ export function WeatherSummaryBanner({
       }}
       title={interactive ? 'Cliquer pour changer de source météo' : undefined}
     >
+      {cityName && (
+        <span style={{ fontWeight: 600 }}>📍 {cityName}</span>
+      )}
       <span style={{ fontWeight: 600 }}>Prochaines 6h :</span>
       <span>{summary}{notableText}</span>
       {providerLabel && (

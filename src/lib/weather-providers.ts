@@ -2,7 +2,7 @@
 // Implemented sources have a Convex action backing them; placeholders are shown
 // disabled in the UI until configuration (API key, etc.) is provided.
 
-export type ProviderId = 'open-meteo' | 'met-no' | 'meteo-france' | 'weather-api'
+export type ProviderId = 'met-no' | 'meteo-france' | 'weather-api'
 
 export interface ProviderInfo {
   id: ProviderId
@@ -11,8 +11,8 @@ export interface ProviderInfo {
   notConfiguredHint?: string // shown as tooltip when configured === false
 }
 
+// Note: Open-Meteo retiré (données peu fiables France). Met.no = source de référence.
 export const PROVIDERS: ProviderInfo[] = [
-  { id: 'open-meteo', label: 'Open-Meteo', configured: true },
   { id: 'met-no', label: 'Met.no (Norvège)', configured: true },
   {
     id: 'meteo-france',
@@ -28,7 +28,7 @@ export const PROVIDERS: ProviderInfo[] = [
   },
 ]
 
-export const DEFAULT_PROVIDER: ProviderId = 'open-meteo'
+export const DEFAULT_PROVIDER: ProviderId = 'met-no'
 
 const STORAGE_KEY = 'teamlap.weather.preferredProvider'
 

@@ -2,12 +2,13 @@ import { v } from 'convex/values'
 import { action, internalMutation, internalQuery, query } from './_generated/server'
 import { api, internal } from './_generated/api'
 
-const TTL_MS = 60 * 60 * 1000 // 1h
+const TTL_MS = 10 * 60 * 1000 // 10 min
 
 // Provider IDs supported by the backend. UI may show others (e.g. 'meteo-france') as placeholders.
-export const SUPPORTED_PROVIDERS = ['open-meteo', 'met-no'] as const
+// Note: Open-Meteo retiré (données peu fiables sur tests France) — Met.no source de référence.
+export const SUPPORTED_PROVIDERS = ['met-no'] as const
 export type ProviderId = typeof SUPPORTED_PROVIDERS[number]
-const DEFAULT_PROVIDER: ProviderId = 'open-meteo'
+const DEFAULT_PROVIDER: ProviderId = 'met-no'
 
 // ─── Provider adapters ─────────────────────────────────────────────────────
 // Each adapter takes lat/lng and returns the same NORMALIZED hourly shape the
@@ -183,10 +184,9 @@ export const fetchWeather = action({
       return { ok: false, reason: 'NO_LAT_LNG', provider }
     }
     try {
-      const data =
-        provider === 'met-no'
-          ? await fetchFromMetNo(event.latitude, event.longitude)
-          : await fetchFromOpenMeteo(event.latitude, event.longitude)
+      // Met.no = seule source supportée (Open-Meteo retiré — données peu fiables FR).
+      // Helper fetchFromOpenMeteo conservé pour réactivation future.
+      const data = await fetchFromMetNo(event.latitude, event.longitude)
       await ctx.runMutation(internal.weather.writeCache, { eventId: args.eventId, provider, data })
       return { ok: true, provider }
     } catch (err: any) {
@@ -202,7 +202,8 @@ export const refreshAllActive = internalMutation({
     const now = Date.now()
     for (const e of events) {
       if (e.status === 'finished') continue
-      if (e.scheduledEnd && e.scheduledEnd + 60 * 60 * 1000 < now) continue
+      // Skip events whose race ended more than 10 min ago (aligned with cache TTL)
+      if (e.scheduledEnd && e.scheduledEnd + 10 * 60 * 1000 < now) continue
       if ((e as any).latitude == null || (e as any).longitude == null) continue
       // Refresh every supported provider — clients may pick any of them at any time
       for (const provider of SUPPORTED_PROVIDERS) {

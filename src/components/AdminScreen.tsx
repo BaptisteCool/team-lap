@@ -53,10 +53,11 @@ interface AdminScreenProps {
   // Event-level "max runners per team" (uniform across all teams). Default 10.
   maxRunnersPerTeam?: number
   onSetMaxRunnersPerTeam?: (value: number) => Promise<void> | void
-  // Geo for weather (Open-Meteo)
+  // Geo for weather (Met.no)
   latitude?: number | null
   longitude?: number | null
-  onSetLatLng?: (lat: number | null, lng: number | null) => Promise<void> | void
+  cityName?: string | null
+  onSetLatLng?: (lat: number | null, lng: number | null, cityName?: string | null) => Promise<void> | void
 }
 
 export function AdminScreen({
@@ -76,6 +77,7 @@ export function AdminScreen({
   onSetMaxRunnersPerTeam,
   latitude,
   longitude,
+  cityName,
   onSetLatLng,
 }: AdminScreenProps) {
   const navigate = useNavigate()
@@ -651,10 +653,30 @@ export function AdminScreen({
               </div>
               <hr className="sep" style={{ margin: '4px 0' }} />
               <div className="hint">
-                Géolocalisation event (lat/lng). Active la météo horaire dans le planning des passages (Open-Meteo). Vide → météo masquée.
+                Géolocalisation event (ville + lat/lng). Active la météo horaire dans le planning des passages (Met.no). Vide → météo masquée.
               </div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <div className="field" style={{ maxWidth: 180 }}>
+                <div className="field" style={{ flex: '1 1 200px', maxWidth: 280 }}>
+                  <span className="field-label">Ville (affichée)</span>
+                  <input
+                    type="text"
+                    defaultValue={cityName ?? ''}
+                    placeholder="Brette les Pins"
+                    maxLength={60}
+                    onBlur={async (e) => {
+                      const raw = e.target.value.trim()
+                      if (raw === (cityName ?? '')) return
+                      try {
+                        await onSetLatLng?.(latitude ?? null, longitude ?? null, raw || null)
+                        pushToast(raw ? `Ville → ${raw}` : 'Ville effacée', 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                      }
+                    }}
+                  />
+                </div>
+                <div className="field" style={{ maxWidth: 160 }}>
                   <span className="field-label">Latitude</span>
                   <input
                     type="number"
@@ -673,7 +695,7 @@ export function AdminScreen({
                         return
                       }
                       try {
-                        await onSetLatLng?.(lat, longitude ?? null)
+                        await onSetLatLng?.(lat, longitude ?? null, cityName ?? null)
                         pushToast('Latitude enregistrée', 'Check')
                       } catch (err: any) {
                         const msg = err?.data?.message || err?.message || 'Erreur'
@@ -683,7 +705,7 @@ export function AdminScreen({
                     style={{ textAlign: 'center' }}
                   />
                 </div>
-                <div className="field" style={{ maxWidth: 180 }}>
+                <div className="field" style={{ maxWidth: 160 }}>
                   <span className="field-label">Longitude</span>
                   <input
                     type="number"
@@ -702,7 +724,7 @@ export function AdminScreen({
                         return
                       }
                       try {
-                        await onSetLatLng?.(latitude ?? null, lng)
+                        await onSetLatLng?.(latitude ?? null, lng, cityName ?? null)
                         pushToast('Longitude enregistrée', 'Check')
                       } catch (err: any) {
                         const msg = err?.data?.message || err?.message || 'Erreur'

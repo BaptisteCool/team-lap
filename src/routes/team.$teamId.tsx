@@ -469,6 +469,7 @@ function TeamPage() {
             weatherForecast={weather?.data || null}
             weatherUnavailable={null}
             weatherProviderLabel={weatherProviderLabel}
+            weatherCityName={(event as any)?.cityName ?? null}
             onOpenWeatherDialog={
               event?._id && (event as any)?.latitude != null && (event as any)?.longitude != null
                 ? () => setWeatherDialogOpen(true)

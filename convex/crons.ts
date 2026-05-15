@@ -10,10 +10,10 @@ crons.interval(
   api.laps.autoTick,
 )
 
-// Refresh weather forecast for all active events every hour (Open-Meteo).
+// Refresh weather forecast for all active events every 10 minutes (Met.no).
 crons.interval(
   'weather refresh',
-  { hours: 1 },
+  { minutes: 10 },
   internal.weather.refreshAllActive,
 )
 

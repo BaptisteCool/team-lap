@@ -52,6 +52,7 @@ interface PlanningScreenProps {
   // Banner click → open source picker dialog
   onOpenWeatherDialog?: () => void
   weatherProviderLabel?: string
+  weatherCityName?: string | null
 }
 
 export function PlanningScreen({
@@ -76,6 +77,7 @@ export function PlanningScreen({
   weatherUnavailable,
   onOpenWeatherDialog,
   weatherProviderLabel,
+  weatherCityName,
 }: PlanningScreenProps) {
   // Helper: pick hourly index closest to a target ms epoch.
   function weatherIndexForTime(target: number): number | null {
@@ -607,6 +609,7 @@ export function PlanningScreen({
                 unavailable={weatherUnavailable}
                 onClick={onOpenWeatherDialog}
                 providerLabel={weatherProviderLabel}
+                cityName={weatherCityName}
               />
               {/* Filter on a runner — null = all */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>

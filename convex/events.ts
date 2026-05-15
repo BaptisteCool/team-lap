@@ -207,10 +207,15 @@ export const setMaxRunnersPerTeam = mutation({
   },
 })
 
-// Set event geolocation (lat/lng) for weather forecast.
+// Set event geolocation (lat/lng + city display name) for weather forecast.
 // Validation: lat -90..90, lng -180..180. ConvexError on invalid input.
 export const setLatLng = mutation({
-  args: { eventId: v.id('events'), latitude: v.optional(v.number()), longitude: v.optional(v.number()) },
+  args: {
+    eventId: v.id('events'),
+    latitude: v.optional(v.number()),
+    longitude: v.optional(v.number()),
+    cityName: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     if (args.latitude !== undefined && (args.latitude < -90 || args.latitude > 90)) {
       throw new ConvexError({ code: 'INVALID_LATITUDE', message: 'Latitude doit être entre -90 et 90.' })
@@ -218,11 +223,11 @@ export const setLatLng = mutation({
     if (args.longitude !== undefined && (args.longitude < -180 || args.longitude > 180)) {
       throw new ConvexError({ code: 'INVALID_LONGITUDE', message: 'Longitude doit être entre -180 et 180.' })
     }
-    await ctx.db.patch(args.eventId, {
-      latitude: args.latitude,
-      longitude: args.longitude,
-      updatedAt: Date.now(),
-    })
+    const patch: Record<string, any> = { updatedAt: Date.now() }
+    if (args.latitude !== undefined) patch.latitude = args.latitude
+    if (args.longitude !== undefined) patch.longitude = args.longitude
+    if (args.cityName !== undefined) patch.cityName = args.cityName.trim().slice(0, 60) || undefined
+    await ctx.db.patch(args.eventId, patch)
   },
 })
 
