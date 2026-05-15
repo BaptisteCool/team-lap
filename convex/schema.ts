@@ -52,10 +52,14 @@ export default defineSchema({
     // Max runners per team (uniform across all teams of this event). Default 10.
     maxRunnersPerTeam: v.optional(v.number()),
 
-    // Geolocation for weather forecast lookup (Open-Meteo). Optional — UI hides
+    // Geolocation for weather forecast lookup (Met.no). Optional — UI hides
     // weather widgets when missing. Validated client-side: -90..90 / -180..180.
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
+
+    // Display name of the city/location associated with lat/lng (free text).
+    // Shown on the weather banner ("Brette les Pins · Prochaines 6h: …").
+    cityName: v.optional(v.string()),
     
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -215,16 +219,20 @@ export default defineSchema({
     .index('by_timestamp', ['timestamp'])
     .index('by_lap_id', ['id']),
 
-  // Weather cache (Open-Meteo hourly forecast per event). TTL ~1h.
+  // Weather cache (hourly forecast per event + provider). TTL ~1h.
+  // provider is optional for backward compatibility; legacy rows w/o provider
+  // are treated as 'open-meteo' and re-fetched on next access.
   weather_cache: defineTable({
     eventId: v.id('events'),
+    provider: v.optional(v.string()), // 'open-meteo' | 'met-no' | 'meteo-france'
     fetchedAt: v.number(),
     expiresAt: v.number(),
-    // Raw JSON payload: { time: number[] (ms epoch), temperature_2m: number[],
-    // relative_humidity_2m: number[], weather_code: number[], precipitation_probability: number[] }
+    // Normalized payload: { time: number[] (ms epoch), temperature_2m, relative_humidity_2m,
+    // weather_code, precipitation_probability, timezone, latitude, longitude }
     data: v.any(),
   })
-    .index('by_event', ['eventId']),
+    .index('by_event', ['eventId'])
+    .index('by_event_provider', ['eventId', 'provider']),
 
   // Rankings (computed and stored)
   rankings: defineTable({

@@ -6,6 +6,14 @@ import { LiveScreen } from '../components/LiveScreen'
 import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
 import { useAction, useMutation, useQuery } from '../convex/hooks'
+import { WeatherSourceDialog } from '../components/WeatherSourceDialog'
+import {
+  DEFAULT_PROVIDER as WEATHER_DEFAULT_PROVIDER,
+  PROVIDERS as WEATHER_PROVIDERS,
+  type ProviderId as WeatherProviderId,
+  readPreferredProvider,
+  writePreferredProvider,
+} from '../lib/weather-providers'
 import { DEFAULT_RUNNERS, estimateGoalLaps, RUNNER_PALETTE, TEAM_COLOR_PALETTE, emptyTeamSlice } from '../lib/race-data'
 
 const EVENT_SLUG = '24h-brette-les-pins-2026'
@@ -54,19 +62,33 @@ function TeamPage() {
   const upsertRunnerMutation = useMutation('teams:upsertRunner' as any)
   const deleteRunnerMutation = useMutation('teams:deleteRunner' as any)
   const setAutoPausedMutation = useMutation('teams:setAutoPaused' as any)
-  // Weather (Open-Meteo via Convex action). Reactive query + on-demand fetch.
-  const weather = useQuery('weather:getWeatherForEvent' as any, event?._id ? { eventId: event._id } : 'skip') as any
+  // Weather (multi-provider via Convex). User pref persisted in localStorage.
+  const [weatherProvider, setWeatherProvider] = useState<WeatherProviderId>(() => readPreferredProvider())
+  const [weatherDialogOpen, setWeatherDialogOpen] = useState(false)
+  const weather = useQuery(
+    'weather:getWeatherForEvent' as any,
+    event?._id ? { eventId: event._id, provider: weatherProvider } : 'skip',
+  ) as any
   const fetchWeatherAction = useAction('weather:fetchWeather' as any)
   // Trigger a refresh when cache is missing or stale (and we have lat/lng).
   React.useEffect(() => {
     if (!event?._id) return
     if ((event as any)?.latitude == null || (event as any)?.longitude == null) return
-    // weather === undefined → still loading; null → no cache row yet; defined with .stale → expired
     if (weather === undefined) return
     if (weather === null || weather?.stale) {
-      fetchWeatherAction({ eventId: event._id }).catch((err: any) => console.warn('weather fetch failed', err))
+      fetchWeatherAction({ eventId: event._id, provider: weatherProvider }).catch((err: any) =>
+        console.warn('weather fetch failed', err),
+      )
     }
-  }, [event?._id, (event as any)?.latitude, (event as any)?.longitude, weather === null, weather?.stale])
+  }, [
+    event?._id,
+    (event as any)?.latitude,
+    (event as any)?.longitude,
+    weather === null,
+    weather?.stale,
+    weatherProvider,
+  ])
+  const weatherProviderLabel = WEATHER_PROVIDERS.find((p) => p.id === weatherProvider)?.label ?? WEATHER_DEFAULT_PROVIDER
   const setRunnerGroupMutation = useMutation('teams:setRunnerGroup' as any)
   const enqueueGroupModeMutation = useMutation('teams:enqueueGroupMode' as any)
   const cancelGroupModeEntryMutation = useMutation('teams:cancelGroupModeEntry' as any)
@@ -446,6 +468,13 @@ function TeamPage() {
             })()}
             weatherForecast={weather?.data || null}
             weatherUnavailable={null}
+            weatherProviderLabel={weatherProviderLabel}
+            weatherCityName={(event as any)?.cityName ?? null}
+            onOpenWeatherDialog={
+              event?._id && (event as any)?.latitude != null && (event as any)?.longitude != null
+                ? () => setWeatherDialogOpen(true)
+                : undefined
+            }
             groupModeQueue={(team as any).groupModeQueue}
             onSetRunnerGroup={(rid, group) => {
               if (readonly || !teamData?._id) return
@@ -620,6 +649,23 @@ function TeamPage() {
           </button>
         </div>
       )}
+
+      {/* Weather source picker dialog */}
+      <WeatherSourceDialog
+        open={weatherDialogOpen}
+        onClose={() => setWeatherDialogOpen(false)}
+        eventId={event?._id ?? null}
+        currentProvider={weatherProvider}
+        onSelect={(id) => {
+          setWeatherProvider(id)
+          const r = writePreferredProvider(id)
+          if (!r.persisted) {
+            pushToast('Préférence non persistée sur ce navigateur', 'AlertTriangle')
+          } else {
+            pushToast(`Source météo : ${WEATHER_PROVIDERS.find((p) => p.id === id)?.label ?? id}`, 'Check')
+          }
+        }}
+      />
 
       {/* Toast notifications */}
       <div className="toast-stack">

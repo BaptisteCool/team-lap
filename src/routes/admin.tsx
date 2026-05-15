@@ -369,12 +369,14 @@ function AdminPage() {
         }}
         latitude={(event as any)?.latitude ?? null}
         longitude={(event as any)?.longitude ?? null}
-        onSetLatLng={async (lat: number | null, lng: number | null) => {
+        cityName={(event as any)?.cityName ?? null}
+        onSetLatLng={async (lat: number | null, lng: number | null, city?: string | null) => {
           if (!event?._id) throw new Error('Événement non chargé')
           await setLatLngMutation({
             eventId: event._id,
             latitude: lat ?? undefined,
             longitude: lng ?? undefined,
+            cityName: city ?? undefined,
           })
         }}
       />
