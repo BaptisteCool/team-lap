@@ -409,7 +409,7 @@ function TeamPage() {
                 onClick={() => setActiveTab(t.id)}
                 className="tab"
               >
-                <span>{t.icon}</span>
+                <span className="team-tab-icon" aria-hidden="true">{t.icon}</span>
                 <span className="team-tab-label">{t.label}</span>
               </button>
             ))}
