@@ -317,9 +317,38 @@ export function HistoryScreen({
       )}
 
       <div className="card">
-        <div className="card-head">
+        <div className="card-head" style={{ flexWrap: 'wrap', gap: 8 }}>
           <span>📊</span>
           <h3>Statistiques</h3>
+          <select
+            value={filterRunnerId ?? ''}
+            onChange={(e) => setFilterRunnerId(e.target.value || null)}
+            title="Filtrer par coureur (s'applique à l'historique)"
+            style={{
+              marginLeft: 'auto',
+              padding: '4px 8px',
+              fontSize: 13,
+              background: 'var(--bg-2)',
+              color: 'var(--text)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+            }}
+          >
+            <option value="">Tous les coureurs</option>
+            {runners.map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+          {filterRunnerId && (
+            <button
+              className="btn ghost"
+              style={{ fontSize: 12, padding: '3px 8px' }}
+              onClick={() => setFilterRunnerId(null)}
+              title="Réinitialiser le filtre"
+            >
+              ✕
+            </button>
+          )}
         </div>
         <div className="card-body">
           <div className="stat-row">
@@ -351,12 +380,12 @@ export function HistoryScreen({
       </div>
 
       <div className="card">
-        <div className="card-head">
+        <div className="card-head" style={{ flexWrap: 'wrap', gap: 8 }}>
           <span>📜</span>
-          <h3>Historique des tours · {sortedLaps.length}{filterRunnerId ? ` (${runners.find((r) => r.id === filterRunnerId)?.name || '—'})` : ''}</h3>
+          <h3>Historique{filterRunnerId ? ` · ${runners.find((r) => r.id === filterRunnerId)?.name || '—'}` : ''}</h3>
           {onAddBulkRelay && (
             <button
-              className="btn primary"
+              className="btn primary hide-on-mobile"
               style={{ marginLeft: 'auto', fontSize: 13 }}
               onClick={() => setBulkOpen(true)}
               title="Ajouter ou recaler tout un relai d'un coup (rattrapage)"
@@ -366,37 +395,6 @@ export function HistoryScreen({
           )}
         </div>
         <div className="card-body">
-          {/* Filter on a single runner — null = all */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            <label className="hint" style={{ fontSize: 12 }}>Filtrer :</label>
-            <select
-              value={filterRunnerId ?? ''}
-              onChange={(e) => setFilterRunnerId(e.target.value || null)}
-              style={{
-                padding: '4px 8px',
-                fontSize: 13,
-                background: 'var(--bg-2)',
-                color: 'var(--text)',
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-              }}
-            >
-              <option value="">Tous les coureurs</option>
-              {runners.map((r) => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
-            </select>
-            {filterRunnerId && (
-              <button
-                className="btn ghost"
-                style={{ fontSize: 12, padding: '3px 8px' }}
-                onClick={() => setFilterRunnerId(null)}
-                title="Réinitialiser le filtre"
-              >
-                ✕ Réinitialiser
-              </button>
-            )}
-          </div>
           {sortedLaps.length === 0 ? (
             <div className="empty">
               {filterRunnerId
