@@ -15,9 +15,12 @@ interface GpxMapProps {
   progress?: number
   showLabel?: boolean
   markers?: Marker[]
+  markerLabel?: string
+  markerSubLabel?: string
+  markerColor?: string
 }
 
-export function GpxMap({ height, marker, progress, showLabel = true, markers }: GpxMapProps) {
+export function GpxMap({ height, marker, progress, showLabel = true, markers, markerLabel, markerSubLabel, markerColor }: GpxMapProps) {
   const pathRef = useRef<SVGPathElement>(null)
   const [computedMarker, setComputedMarker] = useState<{ x: number; y: number } | null>(null)
   const [computedMulti, setComputedMulti] = useState<Array<Marker & { x: number; y: number }>>([])
@@ -96,11 +99,23 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers }: 
             transform={`translate(${m.x} ${m.y})`}
             style={{ transition: singleSeen ? 'transform 350ms linear' : 'none' }}
           >
-            <circle r="14" fill="var(--warn)" opacity="0.18">
+            <circle r="14" fill={markerColor || 'var(--warn)'} opacity="0.18">
               <animate attributeName="r" values="12;18;12" dur="1.6s" repeatCount="indefinite"/>
               <animate attributeName="opacity" values="0.25;0.05;0.25" dur="1.6s" repeatCount="indefinite"/>
             </circle>
-            <circle r="7" fill="var(--warn)" stroke="var(--bg)" strokeWidth="2"/>
+            <circle r="7" fill={markerColor || 'var(--warn)'} stroke="var(--bg)" strokeWidth="2"/>
+            {markerLabel && (
+              <text x="13" y="-9" fill="var(--text)" fontSize="11" fontWeight="700"
+                    style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, strokeLinejoin: 'round' }}>
+                {markerLabel}
+              </text>
+            )}
+            {markerSubLabel && (
+              <text x="13" y="5" fill="var(--text-2)" fontSize="10" fontWeight="600"
+                    style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 2.5, strokeLinejoin: 'round' }}>
+                {markerSubLabel}
+              </text>
+            )}
           </g>
         )}
         {computedMulti.map(mk => {
@@ -114,13 +129,13 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers }: 
               <circle r="10" fill={mk.color} opacity="0.18" />
               <circle r="5.5" fill={mk.color} stroke="var(--bg)" strokeWidth="2" />
               {mk.label && (
-                <text x="9" y="-7" fill="var(--text)" fontSize="9" fontWeight="600"
+                <text x="11" y="-8" fill="var(--text)" fontSize="10" fontWeight="700"
                       style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, strokeLinejoin: 'round' }}>
                   {mk.label}
                 </text>
               )}
               {mk.subLabel && (
-                <text x="9" y="3" fill="var(--text-2)" fontSize="7" fontWeight="500"
+                <text x="11" y="5" fill="var(--text-2)" fontSize="9" fontWeight="600"
                       style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 2.5, strokeLinejoin: 'round' }}>
                   {mk.subLabel}
                 </text>
