@@ -137,6 +137,29 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
       if (t.autoPaused) progress = 0.92
       // Team finished → marker frozen on line (sportive end)
       if ((t as any).finishedAt) progress = 1
+      // Sublabel: "Nom4 M,SS 1.X/N" — nom coureur tronqué + allure courante + tour
+      let subLabel: string | undefined
+      if (dbCurrent && !(t as any).finishedAt) {
+        const nameShort = (dbCurrent.name || '').slice(0, 4)
+        const minLapMsSub = (event?.minLapSec ?? 165) * 1000
+        const maxLapMsSub = (event?.maxLapSec ?? 480) * 1000
+        let paceMin = dbCurrent.kmMin
+        let paceSec = dbCurrent.kmSec
+        if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
+          const lapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec)
+          if (lapMs >= minLapMsSub && lapMs <= maxLapMsSub) {
+            paceMin = dbCurrent.liveKmMin
+            paceSec = dbCurrent.liveKmSec
+          }
+        }
+        const paceShort = `${paceMin},${String(paceSec).padStart(2, '0')}`
+        const runnerLapsSub = tLaps.filter((l) => l.runnerId === dbCurrent.id).length
+        const plannedLapsSub = dbCurrent.plannedLaps
+        const lapsTxt = plannedLapsSub && plannedLapsSub > 0
+          ? `1.${runnerLapsSub + 1}/${plannedLapsSub}`
+          : `1.${runnerLapsSub + 1}`
+        subLabel = `${nameShort} ${paceShort} ${lapsTxt}`
+      }
       return {
         id: t._id,
         color: t.color || TEAM_COLOR_PALETTE[0],
@@ -146,6 +169,7 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
           : inHandoverWindow
             ? `${t.name || ''} · 🤝 ${handoverRemainingSec}s`
             : (t.name || ''),
+        subLabel,
       }
     })
 
