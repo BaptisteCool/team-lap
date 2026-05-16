@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-05-16 — 1.0.2
+
+### Public
+
+**Nouveautés**
+- Vue publique d'une équipe : n'importe qui peut désormais consulter le planning et l'historique d'une équipe via un lien partageable `/team/{id}` (lecture seule), idéal pour les amis et familles des coureurs.
+- Bouton « Login » sur la page équipe : permet au gestionnaire de basculer en mode complet en saisissant son code PIN (mémorisé sur l'appareil pour les visites suivantes).
+- Marker carte circuit enrichi : sous le nom de l'équipe, affichage du coureur en piste (4 caractères), allure courante (`M'SS`) et tour en cours (`X/N`).
+
+**Améliorations**
+- Page équipe en mode visiteur : ne montre que les onglets Planning et Historique, sans aucune action d'écriture (pas d'édition, pas de bouton supprimer, pas de menu de ligne).
+- Filtre coureur (Planning « Prochains passages » + Historique) : reste actif en mode visiteur pour suivre uniquement son coureur favori.
+- Bouton retour intelligent : affiche « ← Admin » uniquement si un PIN admin a déjà été validé sur l'appareil, sinon « ← Accueil ».
+
+### Admin / Technique
+
+**Front**
+- Nouvelle route `/team/$teamId` exploitée comme point d'entrée unique (depuis HomeScreen, click équipe → readonly direct, plus de gate PinGate intermédiaire)
+- `team.$teamId.tsx` : auto-unlock manager mode via localStorage `teamlap.team.{id}.pin.{pin}` au mount, Modal PIN inline, sécu bidirectionnelle (force `readonly=true` si URL `readonly=false` sans PIN cached → bloque bypass URL)
+- `PlanningScreen` : prop `readonly` → cache « Ordre des relais », « Cycle complet », « Groupes », layout single-column. Garde « Prochains passages »
+- `HistoryScreen` : callbacks edit/delete/insert/bulk passés à `undefined` quand readonly → cache sections Classement/Évolution/Historique positions + boutons d'action + menu ligne (⋯)
+- `GpxMap` : extension single-marker avec `markerLabel`, `markerSubLabel`, `markerColor` pour atteindre la parité avec les markers multi
+- `HomeScreen` + `LiveScreen` : compute `subLabel` avec stint laps (depuis dernier relai), pace `M'SS` apostrophe, format `X/N`
+- CSS `.is-readonly` : exemptions pour `.filter-select`, `.filter-input`, `.filter-btn` afin de garder les filtres lecture interactifs
+
+**Sécurité**
+- Validation PIN reste **client-side uniquement** dans cette v1 — durcissement Convex serveur (validation PIN sur chaque mutation) reporté à une issue séparée
+
+**Issues fermées**
+- #22 — Afficher nom du coureur et tour en cours sur les cartes circuit du dashboard
+- #23 — Vue publique équipe `/team/{id}` (lecture seule) + login PIN pour mode gestionnaire
+
 ## 2026-05-15 — 1.0.1
 
 ### Public
