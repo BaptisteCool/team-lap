@@ -108,9 +108,11 @@ export const recordLap = mutation({
       { runnerOverride: effectiveRunnerOverride, bypassDebounce: true, replaces },
     )
 
-    // Resume cron auto-tick after a manual action + arm a cooldown so the cron stays out
-    // for the admin-configured window (replaceAutoWindowSec).
-    const cooldownMs = t.replaceAutoWindowSec * 1000
+    // Resume cron auto-tick after a manual action + arm a short anti-bounce cooldown.
+    // Distinct from replaceAutoWindowSec (UI replace-auto window). Keeping this short
+    // (10s prod / 1s test) lets the cron resume for the NEXT lap normally, which is
+    // critical when lap times are close to or shorter than replaceAutoWindowSec.
+    const cooldownMs = t.cronCooldownAfterManualSec * 1000
     await ctx.db.patch(args.teamId, {
       autoPaused: false,
       cronCooldownUntil: now + cooldownMs,
@@ -118,12 +120,12 @@ export const recordLap = mutation({
     })
 
     // Server-side auto-calibration: update runner.liveKm from the manual lap time.
-    // Use effective lap time bounds so test mode (short laps) calibrates too.
+    // Manual laps are user-validated → trust the value. Only guard against absurd
+    // values: floor at MIN_LAP_GAP_MS (5s, prevents double-tap garbage), no upper cap
+    // (a runner can legitimately be much slower than maxLapSec, e.g. injured walk).
     if (result && args.runnerId) {
       const lapTime = (result as any).lapTime as number
-      const minLapMs = t.minLapSec * 1000
-      const maxLapMs = t.maxLapSec * 1000
-      if (lapTime >= minLapMs && lapTime <= maxLapMs) {
+      if (lapTime >= MIN_LAP_GAP_MS) {
         const lapDistanceM = 900
         const secPerKm = (lapTime / 1000) * (1000 / lapDistanceM)
         const min = Math.floor(secPerKm / 60)
@@ -255,15 +257,16 @@ async function decideAutoLap(
   if (elapsed < MIN_LAP_GAP_MS) throw new Error(`decide:debounce elapsed=${elapsed}<${MIN_LAP_GAP_MS}`)
 
   // Expected lap duration (live pace > pace estim).
-  // Use effective lap-time bounds (test mode supports very short laps).
   const tDecide = getEffectiveTimings(event)
   const minLapMs = tDecide.minLapSec * 1000
-  const maxLapMs = tDecide.maxLapSec * 1000
   const lapDistanceM = 900
+  // Live pace from last manual lap (auto-calibrated). Trust it as soon as it's
+  // set and > debounce floor — manuals are user-validated, including legitimately
+  // slow laps that would fall outside admin bounds.
   const liveLapMs = (runner.liveKmMin != null && runner.liveKmSec != null)
     ? Math.round(((runner.liveKmMin * 60 + runner.liveKmSec) * lapDistanceM) / 1000) * 1000
     : 0
-  const liveOk = liveLapMs > 0 && liveLapMs >= minLapMs && liveLapMs <= maxLapMs
+  const liveOk = liveLapMs >= MIN_LAP_GAP_MS
   const kmMin = liveOk ? runner.liveKmMin : (runner.kmMin ?? 6)
   const kmSec = liveOk ? runner.liveKmSec : (runner.kmSec ?? 0)
   const paceSec = kmMin * 60 + kmSec
@@ -279,8 +282,13 @@ async function decideAutoLap(
   const offsetMs = prevWasRelay ? tDecide.relayTransitionSec * 1000 : 0
   const expectedLapMs = baseExpectedLapMs + offsetMs
 
-  // Tolerance: only auto-trigger when expected time is reached or slightly past
-  if (elapsed < expectedLapMs) throw new Error(`decide:not ready elapsed=${elapsed}<expected=${expectedLapMs} runner=${runner.name}`)
+  // Late-grace window: after the expected end, leave the team a short delay to record
+  // a late-manual themselves before the cron closes the lap automatically.
+  const lateGraceMs = tDecide.lateGraceSec * 1000
+  if (elapsed < expectedLapMs + lateGraceMs)
+    throw new Error(
+      `decide:not ready elapsed=${elapsed}<expected+grace=${expectedLapMs + lateGraceMs} (expected=${expectedLapMs}, grace=${lateGraceMs}) runner=${runner.name}`,
+    )
 
   // Count laps for this runner since last relai (relay_*)
   const lapsForRunner = await ctx.db
@@ -616,11 +624,12 @@ export const deleteLap = mutation({
     // Delete the lap first
     await ctx.db.delete(args.lapId)
 
-    // Arm cron cooldown so cron doesn't immediately re-fire after undo (gives user time to redo manually)
+    // Arm a short anti-bounce cooldown so the cron doesn't immediately re-fire after undo.
+    // Same semantics as recordLap: keep cron out briefly, then let it resume normally for the next lap.
     const team = await ctx.db.get(lap.teamId)
     const event = team ? await ctx.db.get(team.eventId) : null
     const tUndo = getEffectiveTimings(event)
-    const cooldownMs = tUndo.replaceAutoWindowSec * 1000
+    const cooldownMs = tUndo.cronCooldownAfterManualSec * 1000
     await ctx.db.patch(lap.teamId, { cronCooldownUntil: now + cooldownMs })
 
     // Restore team.currentIdx + groupModeQueue using the snapshot taken at insert time (most accurate)

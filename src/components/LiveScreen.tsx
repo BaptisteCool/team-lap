@@ -328,13 +328,14 @@ export function LiveScreen({
     setPickerOpen(null)
   }
 
-  // Expected lap duration: prefer liveKm (auto-calibrated from last manual Top) if its lap is within admin bounds,
-  // else fallback to configured target (kmMin/kmSec). On relay, server clears liveKm → fallback applies.
+  // Expected lap duration: prefer liveKm (auto-calibrated from last manual Top) — manual
+  // laps are user-validated so we trust the value even if it falls outside admin bounds.
+  // On relay, server clears liveKm → fallback to configured target (kmMin/kmSec).
   const expectedLapMs = (() => {
     if (!currentRunner) return 0
     if (currentRunner.liveKmMin != null && currentRunner.liveKmSec != null) {
       const liveLapMs = kmPaceToLapMs(currentRunner.liveKmMin, currentRunner.liveKmSec)
-      if (liveLapMs >= minLapSec * 1000 && liveLapMs <= maxLapSec * 1000) return liveLapMs
+      if (liveLapMs > 0) return liveLapMs
     }
     return kmPaceToLapMs(currentRunner.kmMin, currentRunner.kmSec)
   })()
@@ -436,10 +437,10 @@ export function LiveScreen({
                       }
                       let label = 'cible'
                       let km = { min: currentRunner.kmMin, sec: currentRunner.kmSec }
-                      // 1) Explicit liveKm (manual modal or autocalib from manual top) — wins if reasonable
+                      // 1) Explicit liveKm (manual modal or autocalib from manual top) — wins as long as set.
                       if (currentRunner.liveKmMin != null && currentRunner.liveKmSec != null) {
                         const liveLapMs = kmPaceToLapMs(currentRunner.liveKmMin, currentRunner.liveKmSec)
-                        if (liveLapMs >= minLapSec * 1000 && liveLapMs <= maxLapSec * 1000) {
+                        if (liveLapMs > 0) {
                           label = 'manuel'
                           km = { min: currentRunner.liveKmMin, sec: currentRunner.liveKmSec }
                           lastLapInRelay = null // skip lap-based fallback below
@@ -933,7 +934,7 @@ export function LiveScreen({
                     let paceSec = currentRunner.kmSec
                     if (currentRunner.liveKmMin != null && currentRunner.liveKmSec != null) {
                       const lapMs = kmPaceToLapMs(currentRunner.liveKmMin, currentRunner.liveKmSec)
-                      if (lapMs >= minLapSec * 1000 && lapMs <= maxLapSec * 1000) {
+                      if (lapMs > 0) {
                         paceMin = currentRunner.liveKmMin
                         paceSec = currentRunner.liveKmSec
                       }
