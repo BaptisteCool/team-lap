@@ -5,6 +5,7 @@ import { HistoryScreen } from '../components/HistoryScreen'
 import { LiveScreen } from '../components/LiveScreen'
 import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
+import { Modal } from '../components/Modal'
 import { useAction, useMutation, useQuery } from '../convex/hooks'
 import { WeatherSourceDialog } from '../components/WeatherSourceDialog'
 import { TestModeBadge } from '../components/TestModeBadge'
@@ -29,7 +30,11 @@ const TABS: Array<{ id: Tab; label: string; icon: string }> = [
   { id: 'contact', label: 'Contact', icon: '📞' },
 ]
 
+const VIEWER_TABS: Tab[] = ['planning', 'history']
+
 const TAB_IDS = TABS.map((t) => t.id) as Tab[]
+
+const teamUnlockKey = (teamId: string, pin: string) => `teamlap.team.${teamId}.pin.${pin}`
 
 export const Route = createFileRoute('/team/$teamId')({
   component: TeamPage,
@@ -44,10 +49,21 @@ export const Route = createFileRoute('/team/$teamId')({
 
 function TeamPage() {
   const { teamId } = Route.useParams()
-  const { tab: activeTab, readonly } = Route.useSearch()
+  const { tab: rawTab, readonly } = Route.useSearch()
   const navigate = useNavigate()
-  const setActiveTab = (next: Tab) =>
-    navigate({ to: '/team/$teamId', params: { teamId }, search: { tab: next, readonly } })
+  // Viewer mode: restrict tabs to planning + history only (force planning if invalid)
+  const activeTab: Tab = readonly && !VIEWER_TABS.includes(rawTab) ? 'planning' : rawTab
+  const setActiveTab = (next: Tab) => {
+    const safe = readonly && !VIEWER_TABS.includes(next) ? 'planning' : next
+    navigate({ to: '/team/$teamId', params: { teamId }, search: { tab: safe, readonly } })
+  }
+  const [loginOpen, setLoginOpen] = useState(false)
+  const [loginPin, setLoginPin] = useState('')
+  const [loginError, setLoginError] = useState(false)
+  // Admin button visible only if admin PIN already validated on this device
+  const isAdminUnlocked = (() => {
+    try { return localStorage.getItem('teamlap.adminUnlocked') === '1' } catch (_) { return false }
+  })()
 
   const event = useQuery('events:getBySlug' as any, { slug: EVENT_SLUG })
   const teamData = useQuery('teams:getTeam' as any, { teamId: teamId as any })
@@ -135,6 +151,30 @@ function TeamPage() {
     gapNextSec: 0,
     history: [],
   })
+
+  // Sync readonly with localStorage PIN cache:
+  // - readonly=true + PIN cached → flip to readonly=false (auto-unlock)
+  // - readonly=false + no PIN cached → flip to readonly=true (security: prevent URL bypass)
+  useEffect(() => {
+    if (!teamData?.pin) return
+    let cached = false
+    try { cached = localStorage.getItem(teamUnlockKey(teamId, teamData.pin)) === '1' } catch (_) {}
+    if (readonly && cached) {
+      navigate({
+        to: '/team/$teamId',
+        params: { teamId },
+        search: { tab: 'live', readonly: false },
+        replace: true,
+      })
+    } else if (!readonly && !cached) {
+      navigate({
+        to: '/team/$teamId',
+        params: { teamId },
+        search: { tab: 'planning', readonly: true },
+        replace: true,
+      })
+    }
+  }, [readonly, teamData?.pin, teamId])
 
   useEffect(() => {
     if (teamData) {
@@ -355,11 +395,11 @@ function TeamPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <button
               className="btn ghost"
-              onClick={() => navigate({ to: readonly ? '/admin' : '/' })}
+              onClick={() => navigate({ to: isAdminUnlocked ? '/admin' : '/' })}
               style={{ fontSize: 13 }}
-              title={readonly ? 'Retour admin' : 'Retour accueil'}
+              title={isAdminUnlocked ? 'Retour admin' : 'Retour accueil'}
             >
-              ← {readonly ? 'Admin' : 'Accueil'}
+              ← {isAdminUnlocked ? 'Admin' : 'Accueil'}
             </button>
             <span style={{ color: 'var(--muted)' }}>·</span>
             <span
@@ -370,17 +410,31 @@ function TeamPage() {
             />
             <strong style={{ fontSize: 14 }}>{team.name || '(sans nom)'}</strong>
             {readonly && (
-              <span
-                className="badge"
-                style={{
-                  marginLeft: 8,
-                  background: 'oklch(0.78 0.18 80 / 0.18)',
-                  color: 'oklch(0.92 0.16 80)',
-                  border: '1px solid oklch(0.78 0.18 80 / 0.5)',
-                }}
-              >
-                👁️ LECTURE SEULE
-              </span>
+              <>
+                <span
+                  className="badge"
+                  style={{
+                    marginLeft: 8,
+                    background: 'oklch(0.78 0.18 80 / 0.18)',
+                    color: 'oklch(0.92 0.16 80)',
+                    border: '1px solid oklch(0.78 0.18 80 / 0.5)',
+                  }}
+                >
+                  👁️ LECTURE SEULE
+                </span>
+                <button
+                  className="btn primary"
+                  style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 12px' }}
+                  onClick={() => {
+                    setLoginPin('')
+                    setLoginError(false)
+                    setLoginOpen(true)
+                  }}
+                  title="Entrer le PIN pour activer le mode gestionnaire"
+                >
+                  🔓 Login
+                </button>
+              </>
             )}
             {!readonly && (
               <button
@@ -401,7 +455,7 @@ function TeamPage() {
             )}
           </div>
           <div className="tabs team-tabs" role="tablist" style={{ marginTop: 10, overflowX: 'auto', flexWrap: 'wrap' }}>
-            {TABS.map(t => (
+            {TABS.filter(t => !readonly || VIEWER_TABS.includes(t.id)).map(t => (
               <button
                 key={t.id}
                 role="tab"
@@ -431,8 +485,9 @@ function TeamPage() {
         )}
         {activeTab === 'planning' && (
           <PlanningScreen
+            readonly={readonly}
             runners={runners}
-            setRunners={setRunnersPersist}
+            setRunners={readonly ? undefined : setRunnersPersist}
             order={order}
             setOrder={setOrderPersist}
             schedule={schedule}
@@ -480,26 +535,26 @@ function TeamPage() {
                 : undefined
             }
             groupModeQueue={(team as any).groupModeQueue}
-            onSetRunnerGroup={(rid, group) => {
-              if (readonly || !teamData?._id) return
+            onSetRunnerGroup={readonly ? undefined : (rid, group) => {
+              if (!teamData?._id) return
               setRunnerGroupMutation({ teamId: teamData._id, runnerLocalId: rid, group }).catch((err: any) =>
                 console.error('setRunnerGroup:', err),
               )
             }}
-            onEnqueueGroupMode={(groupName, remainingRelays) => {
-              if (readonly || !teamData?._id) return
+            onEnqueueGroupMode={readonly ? undefined : (groupName, remainingRelays) => {
+              if (!teamData?._id) return
               enqueueGroupModeMutation({ teamId: teamData._id, groupName, remainingRelays }).catch((err: any) =>
                 console.error('enqueueGroupMode:', err),
               )
             }}
-            onCancelGroupModeEntry={(index) => {
-              if (readonly || !teamData?._id) return
+            onCancelGroupModeEntry={readonly ? undefined : (index) => {
+              if (!teamData?._id) return
               cancelGroupModeEntryMutation({ teamId: teamData._id, index }).catch((err: any) =>
                 console.error('cancelGroupModeEntry:', err),
               )
             }}
-            onStopActiveGroupMode={() => {
-              if (readonly || !teamData?._id) return
+            onStopActiveGroupMode={readonly ? undefined : () => {
+              if (!teamData?._id) return
               stopActiveGroupModeMutation({ teamId: teamData._id }).catch((err: any) =>
                 console.error('stopActiveGroupMode:', err),
               )
@@ -577,16 +632,14 @@ function TeamPage() {
             minLapSec={(event as any)?.minLapSec ?? 165}
             maxLapSec={(event as any)?.maxLapSec ?? 480}
             relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
-            ranking={ranking}
-            setRanking={setRanking}
-            onAddPosition={() => {}}
-            onDeleteLap={(lapId) => {
-              if (readonly) return
+            ranking={readonly ? undefined : ranking}
+            setRanking={readonly ? undefined : setRanking}
+            onAddPosition={readonly ? undefined : () => {}}
+            onDeleteLap={readonly ? undefined : (lapId) => {
               if (!window.confirm('Supprimer ce tour ?')) return
               deleteLapMutation({ lapId: lapId as any }).catch((err: any) => console.error('delete lap:', err))
             }}
-            onUpdateLap={(lapId, payload) => {
-              if (readonly) return
+            onUpdateLap={readonly ? undefined : (lapId, payload) => {
               updateLapMutation({
                 lapId: lapId as any,
                 runnerId: payload.runnerId,
@@ -604,8 +657,8 @@ function TeamPage() {
                 }
               }
             }}
-            onAddBulkRelay={(p) => {
-              if (readonly || !teamData?._id) return
+            onAddBulkRelay={readonly ? undefined : (p) => {
+              if (!teamData?._id) return
               addBulkRelayMutation({
                 teamId: teamData._id,
                 runnerId: p.runnerId,
@@ -616,8 +669,8 @@ function TeamPage() {
                 approximate: p.approximate,
               }).catch((err: any) => console.error('addBulkRelay:', err))
             }}
-            onInsertLap={(payload) => {
-              if (readonly || !teamData?._id) return
+            onInsertLap={readonly ? undefined : (payload) => {
+              if (!teamData?._id) return
               insertLapAtMutation({
                 teamId: teamData._id,
                 runnerId: payload.runnerId,
@@ -646,7 +699,7 @@ function TeamPage() {
       </div>
 
       {/* Bottom snackbar — team ready toggle, shown before race start on every tab */}
-      {!race.started && teamData?._id && (
+      {!race.started && teamData?._id && !readonly && (
         <div className={`ready-snackbar ${team.ready ? 'is-ready' : ''}`}>
           <span className="ready-msg">
             {team.ready
@@ -678,6 +731,96 @@ function TeamPage() {
           }
         }}
       />
+
+      {/* Login dialog — viewer → manager mode */}
+      {loginOpen && (
+        <Modal
+          title={`Accès gestionnaire : ${team.name || ''}`}
+          icon="🔒"
+          onClose={() => setLoginOpen(false)}
+          footer={
+            <>
+              <button className="btn ghost" onClick={() => setLoginOpen(false)}>
+                Annuler
+              </button>
+              <button
+                className="btn primary"
+                disabled={loginPin.length < 4}
+                onClick={() => {
+                  const expected = teamData?.pin
+                  if (!expected) return
+                  if (loginPin === expected) {
+                    try { localStorage.setItem(teamUnlockKey(teamId, expected), '1') } catch (_) {}
+                    setLoginOpen(false)
+                    setLoginPin('')
+                    setLoginError(false)
+                    navigate({
+                      to: '/team/$teamId',
+                      params: { teamId },
+                      search: { tab: 'live', readonly: false },
+                      replace: true,
+                    })
+                  } else {
+                    setLoginError(true)
+                    setTimeout(() => setLoginError(false), 800)
+                  }
+                }}
+              >
+                ✓ Valider
+              </button>
+            </>
+          }
+        >
+          <div className="grid" style={{ gap: 12 }}>
+            <div className="hint">Entrez le code PIN de l'équipe pour activer le mode gestionnaire.</div>
+            <div className="field">
+              <span className="field-label">Code PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={loginPin}
+                onChange={(e) => setLoginPin(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && loginPin.length >= 4) {
+                    const expected = teamData?.pin
+                    if (!expected) return
+                    if (loginPin === expected) {
+                      try { localStorage.setItem(teamUnlockKey(teamId, expected), '1') } catch (_) {}
+                      setLoginOpen(false)
+                      setLoginPin('')
+                      setLoginError(false)
+                      navigate({
+                        to: '/team/$teamId',
+                        params: { teamId },
+                        search: { tab: 'live', readonly: false },
+                        replace: true,
+                      })
+                    } else {
+                      setLoginError(true)
+                      setTimeout(() => setLoginError(false), 800)
+                    }
+                  }
+                }}
+                autoFocus
+                className="mono"
+                style={{
+                  fontSize: 22,
+                  letterSpacing: '0.4em',
+                  textAlign: 'center',
+                  borderColor: loginError ? 'var(--danger)' : undefined,
+                }}
+                placeholder="••••"
+                autoComplete="off"
+              />
+              {loginError && (
+                <span className="hint" style={{ color: 'var(--danger)' }}>Code incorrect</span>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Toast notifications */}
       <div className="toast-stack">

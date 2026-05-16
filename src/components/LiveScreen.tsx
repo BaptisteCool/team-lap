@@ -924,6 +924,27 @@ export function LiveScreen({
               <div className="live-map">
                 <GpxMap
                   showLabel={false}
+                  markerColor={team?.color}
+                  markerLabel={team?.name}
+                  markerSubLabel={(() => {
+                    if (!currentRunner) return undefined
+                    const nameShort = (currentRunner.name || '').slice(0, 4)
+                    let paceMin = currentRunner.kmMin
+                    let paceSec = currentRunner.kmSec
+                    if (currentRunner.liveKmMin != null && currentRunner.liveKmSec != null) {
+                      const lapMs = kmPaceToLapMs(currentRunner.liveKmMin, currentRunner.liveKmSec)
+                      if (lapMs >= minLapSec * 1000 && lapMs <= maxLapSec * 1000) {
+                        paceMin = currentRunner.liveKmMin
+                        paceSec = currentRunner.liveKmSec
+                      }
+                    }
+                    const paceShort = `${paceMin}'${String(paceSec).padStart(2, '0')}`
+                    const planned = currentRunner.plannedLaps
+                    const lapsTxt = planned && planned > 0
+                      ? `${relayStats.lapsThisRelay + 1}/${planned}`
+                      : `${relayStats.lapsThisRelay + 1}`
+                    return `${nameShort} ${paceShort} ${lapsTxt}`
+                  })()}
                   progress={(() => {
                     if (!race.started || expectedLapMs <= 0) return undefined
                     if (team?.autoPaused) return 0.92

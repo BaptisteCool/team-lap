@@ -137,6 +137,35 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
       if (t.autoPaused) progress = 0.92
       // Team finished → marker frozen on line (sportive end)
       if ((t as any).finishedAt) progress = 1
+      // Sublabel: "Nom4 D,DD X/N" — nom coureur tronqué + allure décimale min/km + tour
+      let subLabel: string | undefined
+      if (dbCurrent && !(t as any).finishedAt) {
+        const nameShort = (dbCurrent.name || '').slice(0, 4)
+        const minLapMsSub = (event?.minLapSec ?? 165) * 1000
+        const maxLapMsSub = (event?.maxLapSec ?? 480) * 1000
+        let paceMin = dbCurrent.kmMin
+        let paceSec = dbCurrent.kmSec
+        if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
+          const lapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec)
+          if (lapMs >= minLapMsSub && lapMs <= maxLapMsSub) {
+            paceMin = dbCurrent.liveKmMin
+            paceSec = dbCurrent.liveKmSec
+          }
+        }
+        const paceShort = `${paceMin}'${String(paceSec).padStart(2, '0')}`
+        // Compte tours du stint courant (depuis dernier relai)
+        let lapsThisStint = 0
+        for (let i = tLaps.length - 1; i >= 0; i--) {
+          const l = tLaps[i]
+          if (l.type === 'relay_manual' || l.type === 'relay_auto') break
+          if (l.runnerId === dbCurrent.id) lapsThisStint++
+        }
+        const plannedLapsSub = dbCurrent.plannedLaps
+        const lapsTxt = plannedLapsSub && plannedLapsSub > 0
+          ? `${lapsThisStint + 1}/${plannedLapsSub}`
+          : `${lapsThisStint + 1}`
+        subLabel = `${nameShort} ${paceShort} ${lapsTxt}`
+      }
       return {
         id: t._id,
         color: t.color || TEAM_COLOR_PALETTE[0],
@@ -146,6 +175,7 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
           : inHandoverWindow
             ? `${t.name || ''} · 🤝 ${handoverRemainingSec}s`
             : (t.name || ''),
+        subLabel,
       }
     })
 
