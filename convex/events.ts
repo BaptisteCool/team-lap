@@ -283,6 +283,24 @@ export const setRelayTransitionSec = mutation({
   },
 })
 
+// Set the late-grace window in seconds (cron waits this delay after expectedLapMs
+// before firing an auto-pass; lets the team record a real late manual first).
+// 0 = legacy behavior (auto fires the instant the expected end is reached).
+export const setLateGraceSec = mutation({
+  args: { eventId: v.id('events'), seconds: v.number() },
+  handler: async (ctx, args) => {
+    const seconds = Math.round(args.seconds)
+    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 300) {
+      throw new ConvexError({
+        code: 'INVALID_LATE_GRACE',
+        message: 'La grâce retard doit être entre 0 et 300 secondes.',
+      })
+    }
+    await ctx.db.patch(args.eventId, { lateGraceSec: seconds, updatedAt: Date.now() })
+    return seconds
+  },
+})
+
 // Set max runners per team at event level. Refuses if any team would exceed.
 export const setMaxRunnersPerTeam = mutation({
   args: { eventId: v.id('events'), value: v.number() },

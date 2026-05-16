@@ -66,6 +66,11 @@ export default defineSchema({
     // and (later) for auto-pass scheduling penalty.
     relayTransitionSec: v.optional(v.number()),
 
+    // Late-grace window in seconds (default 45s). After a tour's expected end time,
+    // the cron waits this extra delay before firing an auto-pass — giving the team
+    // a window to record the real late time manually. 0 = legacy behavior (no grace).
+    lateGraceSec: v.optional(v.number()),
+
     // Test mode: when true, runtime timings (minLapSec/maxLapSec/replaceAutoWindowSec/
     // relayTransitionSec) are overridden by TEST_TIMINGS constants for fast-iteration
     // testing. Locked once race < 10 min from start or status != 'scheduled'.
