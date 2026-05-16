@@ -6,6 +6,7 @@ interface Marker {
   color: string
   progress: number
   label?: string
+  subLabel?: string
 }
 
 interface GpxMapProps {
@@ -116,6 +117,12 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers }: 
                 <text x="9" y="-7" fill="var(--text)" fontSize="9" fontWeight="600"
                       style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, strokeLinejoin: 'round' }}>
                   {mk.label}
+                </text>
+              )}
+              {mk.subLabel && (
+                <text x="9" y="3" fill="var(--text-2)" fontSize="7" fontWeight="500"
+                      style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 2.5, strokeLinejoin: 'round' }}>
+                  {mk.subLabel}
                 </text>
               )}
             </g>
