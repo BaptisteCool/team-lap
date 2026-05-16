@@ -334,6 +334,7 @@ export function HistoryScreen({
           <span>📊</span>
           <h3>Statistiques</h3>
           <select
+            className="filter-select"
             value={filterRunnerId ?? ''}
             onChange={(e) => setFilterRunnerId(e.target.value || null)}
             title="Filtrer par coureur (s'applique à l'historique)"
@@ -548,14 +549,16 @@ export function HistoryScreen({
                       )}
                     </span>
                     <div style={{ position: 'relative' }}>
-                      <button
-                        className="btn ghost icon"
-                        style={{ padding: 4 }}
-                        onClick={() => setMenuOpenId(menuOpenId === (l._id || l.id) ? null : (l._id || l.id))}
-                        title="Actions"
-                      >
-                        ⋯
-                      </button>
+                      {(onDeleteLap || onUpdateLap || onInsertLap) && (
+                        <button
+                          className="btn ghost icon"
+                          style={{ padding: 4 }}
+                          onClick={() => setMenuOpenId(menuOpenId === (l._id || l.id) ? null : (l._id || l.id))}
+                          title="Actions"
+                        >
+                          ⋯
+                        </button>
+                      )}
                       {menuOpenId === (l._id || l.id) && (
                         <>
                           <div

@@ -55,6 +55,8 @@ interface PlanningScreenProps {
   weatherCityName?: string | null
   // Théorique cycle ms snapshotté au top départ (#17). null avant départ.
   theoreticalCycleMs?: number | null
+  // Viewer mode public — masque ordre des relais, cycle complet, groupes, boutons retour/continuer
+  readonly?: boolean
 }
 
 export function PlanningScreen({
@@ -81,6 +83,7 @@ export function PlanningScreen({
   weatherProviderLabel,
   weatherCityName,
   theoreticalCycleMs,
+  readonly = false,
 }: PlanningScreenProps) {
   // Helper: pick hourly index closest to a target ms epoch.
   function weatherIndexForTime(target: number): number | null {
@@ -281,7 +284,8 @@ export function PlanningScreen({
 
   return (
     <div className="page">
-      <div className="grid" style={{ gridTemplateColumns: '1.4fr 1fr', gap: 18 }}>
+      <div className="grid" style={{ gridTemplateColumns: readonly ? '1fr' : '1.4fr 1fr', gap: 18 }}>
+        {!readonly && (
         <div className="card">
           <div className="card-head">
             <span>📋</span>
@@ -445,6 +449,7 @@ export function PlanningScreen({
             </div>
           </div>
         </div>
+        )}
 
         <div className="grid" style={{ gap: 18, alignContent: 'start' }}>
           {/* Groupes — mode relai de groupe (issue #1) */}
@@ -568,6 +573,7 @@ export function PlanningScreen({
             )
           })()}
 
+          {!readonly && (
           <div className="card">
             <div className="card-head">
               <span>⏱️</span>
@@ -621,6 +627,7 @@ export function PlanningScreen({
               </div>
             </div>
           </div>
+          )}
 
           <div className="card">
             <div className="card-head">
@@ -640,6 +647,7 @@ export function PlanningScreen({
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
                 <label className="hint" style={{ fontSize: 12 }}>Filtrer :</label>
                 <select
+                  className="filter-select"
                   value={filterRunnerId ?? ''}
                   onChange={(e) => setFilterRunnerId(e.target.value || null)}
                   style={{

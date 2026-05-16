@@ -60,6 +60,10 @@ function TeamPage() {
   const [loginOpen, setLoginOpen] = useState(false)
   const [loginPin, setLoginPin] = useState('')
   const [loginError, setLoginError] = useState(false)
+  // Admin button visible only if admin PIN already validated on this device
+  const isAdminUnlocked = (() => {
+    try { return localStorage.getItem('teamlap.adminUnlocked') === '1' } catch (_) { return false }
+  })()
 
   const event = useQuery('events:getBySlug' as any, { slug: EVENT_SLUG })
   const teamData = useQuery('teams:getTeam' as any, { teamId: teamId as any })
@@ -148,21 +152,28 @@ function TeamPage() {
     history: [],
   })
 
-  // Auto-unlock manager mode if a valid PIN is cached in localStorage for this team.
-  // Fires once teamData (with its real .pin) is loaded.
+  // Sync readonly with localStorage PIN cache:
+  // - readonly=true + PIN cached → flip to readonly=false (auto-unlock)
+  // - readonly=false + no PIN cached → flip to readonly=true (security: prevent URL bypass)
   useEffect(() => {
-    if (!readonly) return
     if (!teamData?.pin) return
-    try {
-      if (localStorage.getItem(teamUnlockKey(teamId, teamData.pin)) === '1') {
-        navigate({
-          to: '/team/$teamId',
-          params: { teamId },
-          search: { tab: 'live', readonly: false },
-          replace: true,
-        })
-      }
-    } catch (_) {}
+    let cached = false
+    try { cached = localStorage.getItem(teamUnlockKey(teamId, teamData.pin)) === '1' } catch (_) {}
+    if (readonly && cached) {
+      navigate({
+        to: '/team/$teamId',
+        params: { teamId },
+        search: { tab: 'live', readonly: false },
+        replace: true,
+      })
+    } else if (!readonly && !cached) {
+      navigate({
+        to: '/team/$teamId',
+        params: { teamId },
+        search: { tab: 'planning', readonly: true },
+        replace: true,
+      })
+    }
   }, [readonly, teamData?.pin, teamId])
 
   useEffect(() => {
@@ -384,11 +395,11 @@ function TeamPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             <button
               className="btn ghost"
-              onClick={() => navigate({ to: readonly ? '/admin' : '/' })}
+              onClick={() => navigate({ to: isAdminUnlocked ? '/admin' : '/' })}
               style={{ fontSize: 13 }}
-              title={readonly ? 'Retour admin' : 'Retour accueil'}
+              title={isAdminUnlocked ? 'Retour admin' : 'Retour accueil'}
             >
-              ← {readonly ? 'Admin' : 'Accueil'}
+              ← {isAdminUnlocked ? 'Admin' : 'Accueil'}
             </button>
             <span style={{ color: 'var(--muted)' }}>·</span>
             <span
@@ -474,8 +485,9 @@ function TeamPage() {
         )}
         {activeTab === 'planning' && (
           <PlanningScreen
+            readonly={readonly}
             runners={runners}
-            setRunners={setRunnersPersist}
+            setRunners={readonly ? undefined : setRunnersPersist}
             order={order}
             setOrder={setOrderPersist}
             schedule={schedule}
@@ -523,26 +535,26 @@ function TeamPage() {
                 : undefined
             }
             groupModeQueue={(team as any).groupModeQueue}
-            onSetRunnerGroup={(rid, group) => {
-              if (readonly || !teamData?._id) return
+            onSetRunnerGroup={readonly ? undefined : (rid, group) => {
+              if (!teamData?._id) return
               setRunnerGroupMutation({ teamId: teamData._id, runnerLocalId: rid, group }).catch((err: any) =>
                 console.error('setRunnerGroup:', err),
               )
             }}
-            onEnqueueGroupMode={(groupName, remainingRelays) => {
-              if (readonly || !teamData?._id) return
+            onEnqueueGroupMode={readonly ? undefined : (groupName, remainingRelays) => {
+              if (!teamData?._id) return
               enqueueGroupModeMutation({ teamId: teamData._id, groupName, remainingRelays }).catch((err: any) =>
                 console.error('enqueueGroupMode:', err),
               )
             }}
-            onCancelGroupModeEntry={(index) => {
-              if (readonly || !teamData?._id) return
+            onCancelGroupModeEntry={readonly ? undefined : (index) => {
+              if (!teamData?._id) return
               cancelGroupModeEntryMutation({ teamId: teamData._id, index }).catch((err: any) =>
                 console.error('cancelGroupModeEntry:', err),
               )
             }}
-            onStopActiveGroupMode={() => {
-              if (readonly || !teamData?._id) return
+            onStopActiveGroupMode={readonly ? undefined : () => {
+              if (!teamData?._id) return
               stopActiveGroupModeMutation({ teamId: teamData._id }).catch((err: any) =>
                 console.error('stopActiveGroupMode:', err),
               )
@@ -620,16 +632,14 @@ function TeamPage() {
             minLapSec={(event as any)?.minLapSec ?? 165}
             maxLapSec={(event as any)?.maxLapSec ?? 480}
             relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
-            ranking={ranking}
-            setRanking={setRanking}
-            onAddPosition={() => {}}
-            onDeleteLap={(lapId) => {
-              if (readonly) return
+            ranking={readonly ? undefined : ranking}
+            setRanking={readonly ? undefined : setRanking}
+            onAddPosition={readonly ? undefined : () => {}}
+            onDeleteLap={readonly ? undefined : (lapId) => {
               if (!window.confirm('Supprimer ce tour ?')) return
               deleteLapMutation({ lapId: lapId as any }).catch((err: any) => console.error('delete lap:', err))
             }}
-            onUpdateLap={(lapId, payload) => {
-              if (readonly) return
+            onUpdateLap={readonly ? undefined : (lapId, payload) => {
               updateLapMutation({
                 lapId: lapId as any,
                 runnerId: payload.runnerId,
@@ -647,8 +657,8 @@ function TeamPage() {
                 }
               }
             }}
-            onAddBulkRelay={(p) => {
-              if (readonly || !teamData?._id) return
+            onAddBulkRelay={readonly ? undefined : (p) => {
+              if (!teamData?._id) return
               addBulkRelayMutation({
                 teamId: teamData._id,
                 runnerId: p.runnerId,
@@ -659,8 +669,8 @@ function TeamPage() {
                 approximate: p.approximate,
               }).catch((err: any) => console.error('addBulkRelay:', err))
             }}
-            onInsertLap={(payload) => {
-              if (readonly || !teamData?._id) return
+            onInsertLap={readonly ? undefined : (payload) => {
+              if (!teamData?._id) return
               insertLapAtMutation({
                 teamId: teamData._id,
                 runnerId: payload.runnerId,
@@ -689,7 +699,7 @@ function TeamPage() {
       </div>
 
       {/* Bottom snackbar — team ready toggle, shown before race start on every tab */}
-      {!race.started && teamData?._id && (
+      {!race.started && teamData?._id && !readonly && (
         <div className={`ready-snackbar ${team.ready ? 'is-ready' : ''}`}>
           <span className="ready-msg">
             {team.ready
