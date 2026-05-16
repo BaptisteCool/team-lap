@@ -62,6 +62,9 @@ interface AdminScreenProps {
   // Relay transition penalty (seconds). Default 7. Range 0-60.
   relayTransitionSec?: number
   onSetRelayTransitionSec?: (seconds: number) => Promise<void> | void
+  // Late-grace window before cron auto-closes a lap (seconds). Default 45. Range 0-300.
+  lateGraceSec?: number
+  onSetLateGraceSec?: (seconds: number) => Promise<void> | void
   // Test mode (fast timings for QA)
   testMode?: boolean
   onSetTestMode?: (value: boolean) => Promise<void> | void
@@ -94,6 +97,8 @@ export function AdminScreen({
   onSetLatLng,
   relayTransitionSec,
   onSetRelayTransitionSec,
+  lateGraceSec,
+  onSetLateGraceSec,
   testMode,
   onSetTestMode,
   testModeLocked,
@@ -102,6 +107,7 @@ export function AdminScreen({
   onEndRace,
 }: AdminScreenProps) {
   const evRelayTransition = relayTransitionSec ?? 5
+  const evLateGrace = lateGraceSec ?? 45
   const navigate = useNavigate()
   const evMaxRunners = maxRunnersPerTeam ?? 10
   const schedule = admin.schedule || { startISO: '', endISO: '' }
@@ -724,6 +730,30 @@ export function AdminScreen({
                         const msg = err?.data?.message || err?.message || 'Erreur'
                         pushToast(msg, 'AlertTriangle')
                         e.target.value = String(evRelayTransition)
+                      }
+                    }}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+                <div className="field" style={{ maxWidth: 240 }}>
+                  <span className="field-label">Grâce retard (sec)</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="300"
+                    className="mono"
+                    defaultValue={evLateGrace}
+                    title="Délai laissé à l'équipe pour saisir un retard manuel avant que le cron ne ferme automatiquement le tour (0 = pas de grâce)"
+                    onBlur={async (e) => {
+                      const v = Math.max(0, Math.min(300, Math.round(+e.target.value || 0)))
+                      if (v === evLateGrace) return
+                      try {
+                        await onSetLateGraceSec?.(v)
+                        pushToast(`Grâce retard → ${v}s`, 'Check')
+                      } catch (err: any) {
+                        const msg = err?.data?.message || err?.message || 'Erreur'
+                        pushToast(msg, 'AlertTriangle')
+                        e.target.value = String(evLateGrace)
                       }
                     }}
                     style={{ textAlign: 'center' }}

@@ -44,6 +44,7 @@ function AdminPage() {
   const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
   const setLatLngMutation = useMutation('events:setLatLng' as any)
   const setRelayTransitionSecMutation = useMutation('events:setRelayTransitionSec' as any)
+  const setLateGraceSecMutation = useMutation('events:setLateGraceSec' as any)
   const setTestModeMutation = useMutation('events:setTestMode' as any)
   const endRaceMutation = useMutation('events:endRace' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
@@ -386,6 +387,11 @@ function AdminPage() {
         onSetRelayTransitionSec={async (seconds: number) => {
           if (!event?._id) throw new Error('Événement non chargé')
           await setRelayTransitionSecMutation({ eventId: event._id, seconds })
+        }}
+        lateGraceSec={(event as any)?.lateGraceSec ?? 45}
+        onSetLateGraceSec={async (seconds: number) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setLateGraceSecMutation({ eventId: event._id, seconds })
         }}
         testMode={(event as any)?.testMode ?? false}
         onSetTestMode={async (value: boolean) => {
