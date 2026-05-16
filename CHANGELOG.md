@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-05-16 — 1.0.3
+
+### Public
+
+**Corrections**
+- L'automatisation des passages reprend correctement après une action manuelle : un Top manuel ne bloque plus l'auto-pass du tour suivant (auparavant, le cron restait gelé pendant tout le tour qui suit, soit jusqu'à 3 minutes).
+- Nouveau délai de grâce de 45 secondes après l'heure théorique de fin de tour : laisse à l'équipe le temps de saisir manuellement le vrai temps en cas de retard, avant que le système ne ferme automatiquement le tour. Configurable par l'administrateur (0 à 300 sec).
+- L'allure mesurée lors d'un tour manuel est désormais bien prise en compte comme référence pour le tour suivant, même quand le tour est plus lent que prévu (avant : silencieusement ignoré si hors bornes admin).
+
+### Admin / Technique
+
+**Back (Convex)**
+- `convex/lib/timings.ts` : nouvelle constante `cronCooldownAfterManualSec` (10s prod / 1s test) découplée de `replaceAutoWindowSec` (180s, fenêtre UI replace-auto, inchangée). Le cron `autoTick` ne fige plus l'équipe pendant 180s après un manuel.
+- `convex/lib/timings.ts` : nouvelle constante `lateGraceSec` (default 45s prod / 2s test).
+- `convex/schema.ts` : nouveau champ event-level optionnel `lateGraceSec`.
+- `convex/laps.ts` :
+  - `recordLap` + `deleteLap` utilisent `cronCooldownAfterManualSec` pour `cronCooldownUntil`.
+  - `decideAutoLap` ne fire l'auto que si `elapsed >= expectedLapMs + lateGraceMs`.
+  - Calibration `runner.liveKmMin/liveKmSec` post-manuel : bornes relâchées (`>= MIN_LAP_GAP_MS` seulement, pas de borne max — un manuel utilisateur est validé).
+  - `decideAutoLap` accepte une `liveLapMs` hors bornes admin.
+- `convex/events.ts` : nouvelle mutation `setLateGraceSec` (validation 0–300s).
+
+**Front**
+- `src/components/AdminScreen.tsx` : nouvel input event-level « Grâce retard (sec) » à côté de « Transition relai (sec) ».
+- `src/components/LiveScreen.tsx` :
+  - `expectedLapMs` accepte une `liveLapMs` hors bornes admin (`> 0` seulement).
+  - Label « manuel » et marker GPS du circuit lisent `liveKm` sans restriction de bornes.
+- `src/routes/admin.tsx` : wiring `setLateGraceSecMutation` + props vers AdminScreen.
+
+**Issues fermées**
+- #25 — Relance auto-pass/relai après action manuelle + grâce retard avant fermeture auto
+
 ## 2026-05-16 — 1.0.2
 
 ### Public
