@@ -5,6 +5,7 @@ import { HistoryScreen } from '../components/HistoryScreen'
 import { LiveScreen } from '../components/LiveScreen'
 import { PlanningScreen } from '../components/PlanningScreen'
 import { SetupScreen } from '../components/SetupScreen'
+import { Modal } from '../components/Modal'
 import { useAction, useMutation, useQuery } from '../convex/hooks'
 import { WeatherSourceDialog } from '../components/WeatherSourceDialog'
 import { TestModeBadge } from '../components/TestModeBadge'
@@ -29,7 +30,11 @@ const TABS: Array<{ id: Tab; label: string; icon: string }> = [
   { id: 'contact', label: 'Contact', icon: '📞' },
 ]
 
+const VIEWER_TABS: Tab[] = ['planning', 'history']
+
 const TAB_IDS = TABS.map((t) => t.id) as Tab[]
+
+const teamUnlockKey = (teamId: string, pin: string) => `teamlap.team.${teamId}.pin.${pin}`
 
 export const Route = createFileRoute('/team/$teamId')({
   component: TeamPage,
@@ -44,10 +49,17 @@ export const Route = createFileRoute('/team/$teamId')({
 
 function TeamPage() {
   const { teamId } = Route.useParams()
-  const { tab: activeTab, readonly } = Route.useSearch()
+  const { tab: rawTab, readonly } = Route.useSearch()
   const navigate = useNavigate()
-  const setActiveTab = (next: Tab) =>
-    navigate({ to: '/team/$teamId', params: { teamId }, search: { tab: next, readonly } })
+  // Viewer mode: restrict tabs to planning + history only (force planning if invalid)
+  const activeTab: Tab = readonly && !VIEWER_TABS.includes(rawTab) ? 'planning' : rawTab
+  const setActiveTab = (next: Tab) => {
+    const safe = readonly && !VIEWER_TABS.includes(next) ? 'planning' : next
+    navigate({ to: '/team/$teamId', params: { teamId }, search: { tab: safe, readonly } })
+  }
+  const [loginOpen, setLoginOpen] = useState(false)
+  const [loginPin, setLoginPin] = useState('')
+  const [loginError, setLoginError] = useState(false)
 
   const event = useQuery('events:getBySlug' as any, { slug: EVENT_SLUG })
   const teamData = useQuery('teams:getTeam' as any, { teamId: teamId as any })
@@ -135,6 +147,23 @@ function TeamPage() {
     gapNextSec: 0,
     history: [],
   })
+
+  // Auto-unlock manager mode if a valid PIN is cached in localStorage for this team.
+  // Fires once teamData (with its real .pin) is loaded.
+  useEffect(() => {
+    if (!readonly) return
+    if (!teamData?.pin) return
+    try {
+      if (localStorage.getItem(teamUnlockKey(teamId, teamData.pin)) === '1') {
+        navigate({
+          to: '/team/$teamId',
+          params: { teamId },
+          search: { tab: 'live', readonly: false },
+          replace: true,
+        })
+      }
+    } catch (_) {}
+  }, [readonly, teamData?.pin, teamId])
 
   useEffect(() => {
     if (teamData) {
@@ -370,17 +399,31 @@ function TeamPage() {
             />
             <strong style={{ fontSize: 14 }}>{team.name || '(sans nom)'}</strong>
             {readonly && (
-              <span
-                className="badge"
-                style={{
-                  marginLeft: 8,
-                  background: 'oklch(0.78 0.18 80 / 0.18)',
-                  color: 'oklch(0.92 0.16 80)',
-                  border: '1px solid oklch(0.78 0.18 80 / 0.5)',
-                }}
-              >
-                👁️ LECTURE SEULE
-              </span>
+              <>
+                <span
+                  className="badge"
+                  style={{
+                    marginLeft: 8,
+                    background: 'oklch(0.78 0.18 80 / 0.18)',
+                    color: 'oklch(0.92 0.16 80)',
+                    border: '1px solid oklch(0.78 0.18 80 / 0.5)',
+                  }}
+                >
+                  👁️ LECTURE SEULE
+                </span>
+                <button
+                  className="btn primary"
+                  style={{ marginLeft: 'auto', fontSize: 12, padding: '6px 12px' }}
+                  onClick={() => {
+                    setLoginPin('')
+                    setLoginError(false)
+                    setLoginOpen(true)
+                  }}
+                  title="Entrer le PIN pour activer le mode gestionnaire"
+                >
+                  🔓 Login
+                </button>
+              </>
             )}
             {!readonly && (
               <button
@@ -401,7 +444,7 @@ function TeamPage() {
             )}
           </div>
           <div className="tabs team-tabs" role="tablist" style={{ marginTop: 10, overflowX: 'auto', flexWrap: 'wrap' }}>
-            {TABS.map(t => (
+            {TABS.filter(t => !readonly || VIEWER_TABS.includes(t.id)).map(t => (
               <button
                 key={t.id}
                 role="tab"
@@ -678,6 +721,96 @@ function TeamPage() {
           }
         }}
       />
+
+      {/* Login dialog — viewer → manager mode */}
+      {loginOpen && (
+        <Modal
+          title={`Accès gestionnaire : ${team.name || ''}`}
+          icon="🔒"
+          onClose={() => setLoginOpen(false)}
+          footer={
+            <>
+              <button className="btn ghost" onClick={() => setLoginOpen(false)}>
+                Annuler
+              </button>
+              <button
+                className="btn primary"
+                disabled={loginPin.length < 4}
+                onClick={() => {
+                  const expected = teamData?.pin
+                  if (!expected) return
+                  if (loginPin === expected) {
+                    try { localStorage.setItem(teamUnlockKey(teamId, expected), '1') } catch (_) {}
+                    setLoginOpen(false)
+                    setLoginPin('')
+                    setLoginError(false)
+                    navigate({
+                      to: '/team/$teamId',
+                      params: { teamId },
+                      search: { tab: 'live', readonly: false },
+                      replace: true,
+                    })
+                  } else {
+                    setLoginError(true)
+                    setTimeout(() => setLoginError(false), 800)
+                  }
+                }}
+              >
+                ✓ Valider
+              </button>
+            </>
+          }
+        >
+          <div className="grid" style={{ gap: 12 }}>
+            <div className="hint">Entrez le code PIN de l'équipe pour activer le mode gestionnaire.</div>
+            <div className="field">
+              <span className="field-label">Code PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={loginPin}
+                onChange={(e) => setLoginPin(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && loginPin.length >= 4) {
+                    const expected = teamData?.pin
+                    if (!expected) return
+                    if (loginPin === expected) {
+                      try { localStorage.setItem(teamUnlockKey(teamId, expected), '1') } catch (_) {}
+                      setLoginOpen(false)
+                      setLoginPin('')
+                      setLoginError(false)
+                      navigate({
+                        to: '/team/$teamId',
+                        params: { teamId },
+                        search: { tab: 'live', readonly: false },
+                        replace: true,
+                      })
+                    } else {
+                      setLoginError(true)
+                      setTimeout(() => setLoginError(false), 800)
+                    }
+                  }
+                }}
+                autoFocus
+                className="mono"
+                style={{
+                  fontSize: 22,
+                  letterSpacing: '0.4em',
+                  textAlign: 'center',
+                  borderColor: loginError ? 'var(--danger)' : undefined,
+                }}
+                placeholder="••••"
+                autoComplete="off"
+              />
+              {loginError && (
+                <span className="hint" style={{ color: 'var(--danger)' }}>Code incorrect</span>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Toast notifications */}
       <div className="toast-stack">
