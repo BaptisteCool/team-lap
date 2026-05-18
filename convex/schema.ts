@@ -71,15 +71,33 @@ export default defineSchema({
     // a window to record the real late time manually. 0 = legacy behavior (no grace).
     lateGraceSec: v.optional(v.number()),
 
-    // Test mode: when true, runtime timings (minLapSec/maxLapSec/replaceAutoWindowSec/
-    // relayTransitionSec) are overridden by TEST_TIMINGS constants for fast-iteration
-    // testing. Locked once race < 10 min from start or status != 'scheduled'.
+    // Test mode: when true, all runtime durations (target pace, polling intervals,
+    // grace windows, mock reveal timings) are divided by `testModeDivider` so a 24h
+    // race can be exercised in (24h / divider). Default divider 3. Locked once race
+    // < 10 min from start or status != 'scheduled'.
     testMode: v.optional(v.boolean()),
+    testModeDivider: v.optional(v.number()),
+
+    // First-lap distance in meters. The start line is usually offset from the GPS loop
+    // start, making the first lap shorter (or longer) than subsequent laps. Used when
+    // predicting the very first lap's expected time. Defaults to `lapDistance` if absent.
+    firstLapDistanceM: v.optional(v.number()),
 
     // Real end of the race (set by admin via "Arrêter l'événement"). Cron auto-pass
     // skips events with actualEnd. Distinct from scheduledEnd which is theoretical.
     actualEnd: v.optional(v.number()),
-    
+
+    // Chronoplace event id (number, e.g. 225 for "24h running 2026"). Used together with
+    // team.chronoplaceSlug to build the JSON API URL. Optional — only needed for teams
+    // wanting auto-sync from Chronoplace.
+    chronoplaceEventId: v.optional(v.number()),
+
+    // Public URL to the Chronoplace general classement page (visitors / public sharing).
+    chronoplaceClassementUrl: v.optional(v.string()),
+
+    // Public URL to the organizer page (Miles Republic etc.).
+    organizerUrl: v.optional(v.string()),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -144,6 +162,44 @@ export default defineSchema({
       status: v.union(v.literal('active'), v.literal('pending')),
     }))),
 
+    // Chronoplace sync per team. Combined with event.chronoplaceEventId, the action builds:
+    //   GET https://www.chronoplace.fr/api/classement_live_endurance-detail/{eventId}/{slug}
+    // When chronoSyncEnabled === true, autoTick skips this team (Chronoplace is source of truth).
+    chronoplaceSlug: v.optional(v.string()),
+    // Bib number (dossard) — editable in admin before race start, displayed in UI/badges.
+    dossard: v.optional(v.string()),
+    // Public URL to the team-specific Chronoplace results page (shareable, opens new tab).
+    chronoplaceResultsUrl: v.optional(v.string()),
+    chronoSyncEnabled: v.optional(v.boolean()),
+    // Timestamp ms of the last cron tick that ran for this team (success or error).
+    lastChronoSyncAt: v.optional(v.number()),
+    // Last sync error: 'not_found' | 'unreachable' | 'no_slug' | 'no_event_id' | null
+    chronoSyncError: v.optional(v.string()),
+    // Anti-spam: timestamp ms of the last Telegram alert sent — reset on next successful lap.
+    chronoAlertSentAt: v.optional(v.number()),
+    // Mock testMode: pré-calcul du lapTime exact du prochain tour (compressé) depuis
+    // les données API connues à l'avance. Utilisé par les markers frontend pour
+    // animer à la cadence EXACTE du tour en cours (pas juste prédire depuis le précédent).
+    nextExpectedLapMs: v.optional(v.number()),
+    // Mock testMode: id Chronoplace du prochain tour (= tour en cours d'exécution).
+    nextExpectedChronoplaceId: v.optional(v.number()),
+
+    // Active Chronoplace polling burst (server-scheduled via ctx.scheduler).
+    // Manual burst: triggered by a user click (passage/relai). Polls every 3s up to 6×.
+    // Auto burst: chained from each successful lap discovery. Polls every 3s up to 10×.
+    // `startedAt` is the burst identity — stale scheduled steps detect via mismatch and exit.
+    // `lastSeenChronoLapNumber` is the highest lapNumber known when the burst was armed,
+    // used to detect "new" laps in the Chronoplace JSON response.
+    pendingPollBurst: v.optional(v.object({
+      type: v.union(v.literal('manual'), v.literal('auto')),
+      kind: v.union(v.literal('pass'), v.literal('relay')),
+      runnerId: v.optional(v.string()),
+      startedAt: v.number(),
+      attempt: v.number(),
+      maxAttempts: v.number(),
+      lastSeenChronoLapNumber: v.number(),
+    })),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -165,6 +221,13 @@ export default defineSchema({
     // Live pace (updated during race)
     liveKmMin: v.optional(v.number()),
     liveKmSec: v.optional(v.number()),
+
+    // Theoretical relay pace (override): computed from the runner's most recent relay lap
+    // (whose lapTime now includes the relayTransitionSec penalty). Used by decideAutoLap
+    // to predict when this runner's NEXT relay lap should fire, without re-adding the +5s
+    // penalty on top of the runner's regular live pace.
+    theoreticalRelayPaceMin: v.optional(v.number()),
+    theoreticalRelayPaceSec: v.optional(v.number()),
     
     // Energy level (affects pace estimation)
     energy: v.number(), // 0-100
@@ -247,11 +310,23 @@ export default defineSchema({
     // wait an additional offset (relayTransitionMsApplied snapshot) before firing/moving.
     isFirstAfterRelay: v.optional(v.boolean()),
     relayTransitionMsApplied: v.optional(v.number()),
+
+    // Chronoplace sync metadata. When a lap is inserted/updated from the Chronoplace API:
+    //   - chronoplaceId = the unique 'id' field from the JSON response (idempotency key)
+    //   - source = 'chronoplace' (else 'manual' for user clicks, 'auto' for team-lap cron)
+    //   - correctedByChronoplace = true if a prior manual lap was overwritten by Chronoplace.
+    chronoplaceId: v.optional(v.number()),
+    source: v.optional(v.string()),
+    correctedByChronoplace: v.optional(v.boolean()),
+    // Chronoplace classement rang (position) à ce tour — affiché sur le marker map.
+    rang: v.optional(v.number()),
   })
     .index('by_team', ['teamId'])
     .index('by_team_runner', ['teamId', 'runnerId'])
     .index('by_timestamp', ['timestamp'])
-    .index('by_lap_id', ['id']),
+    .index('by_lap_id', ['id'])
+    .index('by_chronoplace_id', ['chronoplaceId'])
+    .index('by_team_lapNumber', ['teamId', 'lapNumber']),
 
   // Weather cache (hourly forecast per event + provider). TTL ~1h.
   // provider is optional for backward compatibility; legacy rows w/o provider
@@ -267,6 +342,19 @@ export default defineSchema({
   })
     .index('by_event', ['eventId'])
     .index('by_event_provider', ['eventId', 'provider']),
+
+  // Presence: viewer heartbeats per event. The server burst chains (auto + stuck retry)
+  // only schedule the next step when at least one fresh heartbeat exists for the event,
+  // so a race with no live viewer consumes zero Convex compute. Heartbeats older than
+  // `PRESENCE_FRESH_MS` are treated as absent and lazily garbage-collected.
+  presence: defineTable({
+    eventId: v.id('events'),
+    sessionId: v.string(),
+    lastBeatAt: v.number(),
+    context: v.optional(v.string()), // 'admin' | 'live:<teamId>' | 'home' — diagnostic only
+  })
+    .index('by_event', ['eventId'])
+    .index('by_event_session', ['eventId', 'sessionId']),
 
   // Rankings (computed and stored)
   rankings: defineTable({

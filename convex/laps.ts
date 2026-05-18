@@ -1,5 +1,6 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import { internal } from './_generated/api'
 import { computeNextRunnerIdx, consumeQueueOnRelay, type GroupModeEntry } from './lib/nextRunner'
 import { getEffectiveTimings } from './lib/timings'
 
@@ -51,6 +52,41 @@ export const recordLap = mutation({
     const team = await ctx.db.get(args.teamId)
     const event = team ? await ctx.db.get(team.eventId) : null
     const t = getEffectiveTimings(event)
+
+    // Chronoplace teams: manual click no longer inserts a lap directly. It arms a
+    // server-scheduled burst that polls Chronoplace every 3s (×6) to discover the actual
+    // lap data. The discovered lap is then tagged with `checkpoint_manual` / `relay_manual`
+    // and the runner provided here.
+    if (team && (team as any).chronoSyncEnabled) {
+      const laps = await ctx.db
+        .query('laps')
+        .withIndex('by_team', (q) => q.eq('teamId', args.teamId))
+        .collect()
+      const lastSeenChronoLapNumber = laps.reduce(
+        (max: number, l: any) => (l.chronoplaceId ? Math.max(max, l.lapNumber || 0) : max),
+        0,
+      )
+      const startedAt = now
+      await ctx.db.patch(args.teamId, {
+        pendingPollBurst: {
+          type: 'manual' as const,
+          kind: args.change ? ('relay' as const) : ('pass' as const),
+          runnerId: args.runnerId,
+          startedAt,
+          attempt: 0,
+          maxAttempts: 6,
+          lastSeenChronoLapNumber,
+        },
+        autoPaused: false,
+        cronCooldownUntil: now + t.cronCooldownAfterManualSec * 1000,
+        updatedAt: now,
+      } as any)
+      await ctx.scheduler.runAfter(0, internal.chronoplace.pollBurstStep, {
+        teamId: args.teamId,
+        burstStartedAt: startedAt,
+      })
+      return { burst: { startedAt, type: 'manual', kind: args.change ? 'relay' : 'pass' } }
+    }
     const windowMs = t.replaceAutoWindowSec * 1000
     const allTeamLaps = await ctx.db
       .query('laps')
@@ -58,14 +94,12 @@ export const recordLap = mutation({
       .collect()
     const sortedDesc = allTeamLaps.sort((a: any, b: any) => b.timestamp - a.timestamp)
     const lastLap = sortedDesc[0] || null
-    const minLapMs = t.minLapSec * 1000
     const isAutoLast = lastLap && (lastLap.type === 'checkpoint_auto' || lastLap.type === 'relay_auto')
     const isRelayLast = lastLap && (lastLap.type === 'relay_auto' || lastLap.type === 'relay_manual')
     // Replace only if the auto fired VERY recently (race condition window MIN_LAP_GAP_MS = 5s).
-    // For tighter than minLap (test mode short laps), also replace to avoid duplicates.
     const RACE_COND_MS = MIN_LAP_GAP_MS
     const withinReplaceAutoWin = lastLap && isAutoLast && now - lastLap.timestamp <= Math.min(windowMs, RACE_COND_MS)
-    const withinMinLapWin = lastLap && now - lastLap.timestamp < Math.min(minLapMs, RACE_COND_MS)
+    const withinMinLapWin = lastLap && now - lastLap.timestamp < RACE_COND_MS
 
     let replaces: any = undefined
     if (lastLap && (withinReplaceAutoWin || withinMinLapWin)) {
@@ -123,11 +157,20 @@ export const recordLap = mutation({
     // Manual laps are user-validated → trust the value. Only guard against absurd
     // values: floor at MIN_LAP_GAP_MS (5s, prevents double-tap garbage), no upper cap
     // (a runner can legitimately be much slower than maxLapSec, e.g. injured walk).
+    //
+    // Relay lap: lapTime includes the relayTransitionSec handover (5s by default).
+    // For liveKm (used to predict regular checkpoint laps), strip the 5s so the
+    // value reflects pure running pace. The relay-padded pace is captured separately
+    // as `theoreticalRelayPaceMin/Sec` by applyLap.
     if (result && args.runnerId) {
       const lapTime = (result as any).lapTime as number
       if (lapTime >= MIN_LAP_GAP_MS) {
+        const relayTransitionMs = t.relayTransitionSec * 1000
+        const adjustedLapTime = args.change
+          ? Math.max(MIN_LAP_GAP_MS, lapTime - relayTransitionMs)
+          : lapTime
         const lapDistanceM = 900
-        const secPerKm = (lapTime / 1000) * (1000 / lapDistanceM)
+        const secPerKm = (adjustedLapTime / 1000) * (1000 / lapDistanceM)
         const min = Math.floor(secPerKm / 60)
         const sec = Math.round(secPerKm - min * 60)
         const runnersDocs = await ctx.db
@@ -184,6 +227,11 @@ export const autoTick = mutation({
         }
         if (team.autoPaused) {
           skipped.push({ teamId: team._id, reason: 'auto paused' })
+          continue
+        }
+        // Chronoplace sync owns the laps for this team — autoTick must not interfere.
+        if ((team as any).chronoSyncEnabled) {
+          skipped.push({ teamId: team._id, reason: 'chronoplace sync' })
           continue
         }
         if ((team as any).cronCooldownUntil && tickNow < (team as any).cronCooldownUntil) {
@@ -256,47 +304,9 @@ async function decideAutoLap(
   const elapsed = now - lastLapAt
   if (elapsed < MIN_LAP_GAP_MS) throw new Error(`decide:debounce elapsed=${elapsed}<${MIN_LAP_GAP_MS}`)
 
-  // Expected lap duration (live pace > pace estim).
-  const tDecide = getEffectiveTimings(event)
-  const minLapMs = tDecide.minLapSec * 1000
-  const lapDistanceM = 900
-  // Live pace from last manual lap (auto-calibrated). Trust it as soon as it's
-  // set and > debounce floor — manuals are user-validated, including legitimately
-  // slow laps that would fall outside admin bounds.
-  const liveLapMs = (runner.liveKmMin != null && runner.liveKmSec != null)
-    ? Math.round(((runner.liveKmMin * 60 + runner.liveKmSec) * lapDistanceM) / 1000) * 1000
-    : 0
-  const liveOk = liveLapMs >= MIN_LAP_GAP_MS
-  const kmMin = liveOk ? runner.liveKmMin : (runner.kmMin ?? 6)
-  const kmSec = liveOk ? runner.liveKmSec : (runner.kmSec ?? 0)
-  const paceSec = kmMin * 60 + kmSec
-  const baseExpectedLapMs = Math.round((paceSec * lapDistanceM) / 1000) * 1000
-  // Defensive: never fire below the admin min-lap floor
-  if (baseExpectedLapMs < minLapMs) throw new Error(`decide:expected too short=${baseExpectedLapMs} < ${minLapMs}`)
-
-  // Add relay-transition penalty if the previous team lap was a relay → the current
-  // upcoming lap is the first lap of the new runner (handover handled in same window).
-  const prevLapForOffset = lastLap as any
-  const prevWasRelay =
-    prevLapForOffset && (prevLapForOffset.type === 'relay_manual' || prevLapForOffset.type === 'relay_auto')
-  const offsetMs = prevWasRelay ? tDecide.relayTransitionSec * 1000 : 0
-  const expectedLapMs = baseExpectedLapMs + offsetMs
-
-  // Late-grace window: after the expected end, leave the team a short delay to record
-  // a late-manual themselves before the cron closes the lap automatically.
-  const lateGraceMs = tDecide.lateGraceSec * 1000
-  if (elapsed < expectedLapMs + lateGraceMs)
-    throw new Error(
-      `decide:not ready elapsed=${elapsed}<expected+grace=${expectedLapMs + lateGraceMs} (expected=${expectedLapMs}, grace=${lateGraceMs}) runner=${runner.name}`,
-    )
-
-  // Count laps for this runner since last relai (relay_*)
-  const lapsForRunner = await ctx.db
-    .query('laps')
-    .withIndex('by_team_runner', (q: any) => q.eq('teamId', team._id).eq('runnerId', currentRunnerLocalId))
-    .collect()
-  // Laps since last relay event (i.e. since this runner became active)
-  // Rough heuristic: count laps after the most recent relay_* whose new runner = current
+  // Determine if the UPCOMING lap is a relay — needed up-front so the relay-transition
+  // penalty (5s) can be added to the relay lap's expected time (not to the first lap
+  // after the relay, per design intent: the 5s is owed by the outgoing runner's handover).
   const allTeamLaps = await ctx.db
     .query('laps')
     .withIndex('by_team', (q: any) => q.eq('teamId', team._id))
@@ -307,12 +317,62 @@ async function decideAutoLap(
     if (l.type === 'relay_manual' || l.type === 'relay_auto') break
     if (l.runnerId === currentRunnerLocalId) lapsThisStint++
   }
-  // include the lap we are about to add
   const upcomingStint = lapsThisStint + 1
-
   const planned = runner.plannedLaps ?? 4
-  void lapsForRunner
-  return upcomingStint >= planned ? 'relay_auto' : 'checkpoint_auto'
+  const upcomingIsRelay = upcomingStint >= planned
+
+  // Expected lap duration (live pace > pace estim).
+  const tDecide = getEffectiveTimings(event)
+  // First lap of the race: the start line is usually offset from the GPS loop start.
+  const isFirstEverLap = !lastLap
+  const lapDistanceM = isFirstEverLap
+    ? (event?.firstLapDistanceM ?? event?.lapDistance ?? 900)
+    : (event?.lapDistance ?? 900)
+  // Live pace from last manual lap (auto-calibrated). Trust it as soon as it's
+  // set and > debounce floor — manuals are user-validated.
+  const liveLapMs = (runner.liveKmMin != null && runner.liveKmSec != null)
+    ? Math.round(((runner.liveKmMin * 60 + runner.liveKmSec) * lapDistanceM) / 1000) * 1000
+    : 0
+  const liveOk = liveLapMs >= MIN_LAP_GAP_MS
+  // For a relay lap, override pace with the runner's theoretical relay pace if we
+  // have one (computed from a prior relay lap, already including the 5s handover).
+  // No theoretical relay pace yet → fall back to live/configured pace + 5s offset.
+  const hasRelayOverride =
+    upcomingIsRelay &&
+    (runner as any).theoreticalRelayPaceMin != null &&
+    (runner as any).theoreticalRelayPaceSec != null
+  let kmMin: number, kmSec: number, scaleByDivider: boolean
+  if (hasRelayOverride) {
+    kmMin = (runner as any).theoreticalRelayPaceMin
+    kmSec = (runner as any).theoreticalRelayPaceSec
+    scaleByDivider = false
+  } else if (liveOk) {
+    kmMin = runner.liveKmMin
+    kmSec = runner.liveKmSec
+    scaleByDivider = false
+  } else {
+    kmMin = runner.kmMin ?? 6
+    kmSec = runner.kmSec ?? 0
+    scaleByDivider = tDecide.testMode
+  }
+  const paceSec = (kmMin * 60 + kmSec) / (scaleByDivider ? tDecide.testModeDivider : 1)
+  const baseExpectedLapMs = Math.round((paceSec * lapDistanceM) / 1000) * 1000
+
+  // Relay handover penalty: 5s belongs to the relay lap itself (outgoing runner's last lap).
+  // - If theoreticalRelayPace is set, the penalty is already baked into pace → no extra offset.
+  // - Else for the first-ever relay of this runner, we add the +5s here.
+  const offsetMs = upcomingIsRelay && !hasRelayOverride ? tDecide.relayTransitionSec * 1000 : 0
+  const expectedLapMs = baseExpectedLapMs + offsetMs
+
+  // Late-grace window: after the expected end, leave the team a short delay to record
+  // a late-manual themselves before the cron closes the lap automatically.
+  const lateGraceMs = tDecide.lateGraceSec * 1000
+  if (elapsed < expectedLapMs + lateGraceMs)
+    throw new Error(
+      `decide:not ready elapsed=${elapsed}<expected+grace=${expectedLapMs + lateGraceMs} (expected=${expectedLapMs}, grace=${lateGraceMs}) runner=${runner.name}`,
+    )
+
+  return upcomingIsRelay ? 'relay_auto' : 'checkpoint_auto'
 }
 
 async function applyLap(
@@ -373,21 +433,13 @@ async function applyLap(
   // Snapshot runner.plannedLaps at insert time (for tour +/- badges later, immune to runner config edits)
   const runnerForLap = runners.find((r: any) => r.id === currentRunnerLocalId)
   const plannedAtStart = runnerForLap?.plannedLaps ?? undefined
-  // Snapshot relay transition flag if the PREVIOUS team lap was a relay (handover penalty
-  // applies to the very first lap of the next runner only). Reads kept untouched lapsAfterReplace
-  // since 'allTeamLaps' was loaded earlier in this handler — re-fetch is overkill for current scope.
-  const teamLapsForFlag = await ctx.db
-    .query('laps')
-    .withIndex('by_team', (q: any) => q.eq('teamId', teamId))
-    .collect()
-  const prevTeamLap = teamLapsForFlag
-    .filter((l: any) => l.type !== 'position')
-    .sort((a: any, b: any) => b.timestamp - a.timestamp)[0]
-  const prevWasRelay = prevTeamLap && (prevTeamLap.type === 'relay_manual' || prevTeamLap.type === 'relay_auto')
+  // Relay handover penalty (5s) is now charged to THIS lap if it's a relay (outgoing
+  // runner's last lap), not to the first lap after a relay. Snapshot the offset on
+  // relay laps so the UI / pace calculators can read back what was applied.
   const eventForFlag = await ctx.db.get(team.eventId)
   const tApply = getEffectiveTimings(eventForFlag)
-  const isFirstAfterRelay = prevWasRelay ? true : undefined
-  const relayTransitionMsApplied = prevWasRelay ? tApply.relayTransitionSec * 1000 : undefined
+  const isFirstAfterRelay = undefined
+  const relayTransitionMsApplied = isRelay ? tApply.relayTransitionSec * 1000 : undefined
 
   const docId = await ctx.db.insert('laps', {
     teamId,
@@ -407,6 +459,16 @@ async function applyLap(
   })
 
   if (isRelay) {
+    // Save the outgoing runner's relay pace (includes the 5s handover already baked into
+    // lapTime). Next time this runner relays, decideAutoLap uses this pace directly without
+    // re-adding the +5s offset. Skipped if lapTime is below the debounce floor.
+    if (runnerForLap && lapTime >= MIN_LAP_GAP_MS) {
+      const pace = kmPaceFromLapMs(lapTime)
+      await ctx.db.patch(runnerForLap._id, {
+        theoreticalRelayPaceMin: pace.min,
+        theoreticalRelayPaceSec: pace.sec,
+      } as any)
+    }
     // Compute next runner via shared helper — respects group-mode active entry if any
     const nextIdx = computeNextRunnerIdx({
       order: order.order,
@@ -432,6 +494,14 @@ async function applyLap(
   }
 
   return { lapId, docId, type, lapNumber, lapTime }
+}
+
+// Pure helper: convert a lap time (ms) over a 900m loop into min/sec per km.
+function kmPaceFromLapMs(lapMs: number, lapDistanceM = 900): { min: number; sec: number } {
+  const secPerKm = (lapMs / 1000) * (1000 / lapDistanceM)
+  const min = Math.floor(secPerKm / 60)
+  const sec = Math.round(secPerKm - min * 60)
+  return { min, sec }
 }
 
 // Update a lap. lapTime can be passed explicitly, else recomputed from previous lap timestamp.

@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { AdminScreen } from '../components/AdminScreen'
 import { PinGate } from '../components/PinGate'
-import { useMutation, useQuery } from '../convex/hooks'
+import { useAction, useMutation, useQuery } from '../convex/hooks'
 import { DEFAULT_ADMIN_PASSWORD, defaultAdminState, emptyTeamSlice, TEAM_COLOR_PALETTE, toLocalDatetime } from '../lib/race-data'
 
 export const Route = createFileRoute('/admin')({
@@ -40,17 +40,84 @@ function AdminPage() {
   const updateContactMutation = useMutation('events:updateContact' as any)
   const updatePasswordMutation = useMutation('events:updateAdminPassword' as any)
   const updateReplaceAutoWindowMutation = useMutation('events:updateReplaceAutoWindow' as any)
-  const updateLapBoundsMutation = useMutation('events:updateLapBounds' as any)
+  const setFirstLapDistanceMutation = useMutation('events:setFirstLapDistance' as any)
+  const setTestModeDividerMutation = useMutation('events:setTestModeDivider' as any)
   const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
   const setLatLngMutation = useMutation('events:setLatLng' as any)
   const setRelayTransitionSecMutation = useMutation('events:setRelayTransitionSec' as any)
-  const setLateGraceSecMutation = useMutation('events:setLateGraceSec' as any)
+  const setChronoplaceEventIdMutation = useMutation('events:setChronoplaceEventId' as any)
+  const setChronoplaceClassementUrlMutation = useMutation('events:setChronoplaceClassementUrl' as any)
+  const setOrganizerUrlMutation = useMutation('events:setOrganizerUrl' as any)
+  const setChronoplaceSlugMutation = useMutation('teams:setChronoplaceSlug' as any)
+  const setChronoplaceResultsUrlMutation = useMutation('teams:setChronoplaceResultsUrl' as any)
+  const setDossardMutation = useMutation('teams:setDossard' as any)
+  const setChronoSyncEnabledMutation = useMutation('teams:setChronoSyncEnabled' as any)
+  const forceChronoSyncAction = useAction('chronoplace:forceSyncTeam' as any)
+  const dispatchChronoSyncAction = useAction('chronoplace:dispatchSync' as any)
+  const presenceBeatMutation = useMutation('presence:beat' as any)
+  const presenceLeaveMutation = useMutation('presence:leave' as any)
+
+  // Presence heartbeat: tells the server "there is at least one viewer for this event"
+  // so the Chronoplace auto-burst chain stays alive. When the last viewer leaves, the
+  // chain naturally dies and stops consuming Convex compute.
+  useEffect(() => {
+    if (!event?._id) return
+    const sessionId = (() => {
+      try {
+        const k = 'teamlap.presence.sessionId'
+        let v = sessionStorage.getItem(k)
+        if (!v) {
+          v = (crypto as any)?.randomUUID
+            ? crypto.randomUUID()
+            : 's_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+          sessionStorage.setItem(k, v)
+        }
+        return v
+      } catch (_) {
+        return 's_fallback_' + Math.random().toString(36).slice(2)
+      }
+    })()
+    let cancelled = false
+    const tick = () => {
+      if (cancelled) return
+      presenceBeatMutation({ eventId: event._id, sessionId, context: 'admin' }).catch(
+        (err: any) => console.warn('presence beat failed', err),
+      )
+    }
+    tick()
+    const id = setInterval(tick, 30_000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+      presenceLeaveMutation({ eventId: event._id, sessionId }).catch(() => {})
+    }
+  }, [event?._id])
   const setTestModeMutation = useMutation('events:setTestMode' as any)
   const endRaceMutation = useMutation('events:endRace' as any)
   const startItrMutation = useMutation('events:startInterruption' as any)
   const endItrMutation = useMutation('events:endInterruption' as any)
   const updateItrMutation = useMutation('events:updateInterruption' as any)
   const deleteItrMutation = useMutation('events:deleteInterruption' as any)
+
+  // Chronoplace safety-net: poll dispatchSync every 30s while admin screen is open.
+  // Server-side burst chain is the primary sync; this is a backstop.
+  useEffect(() => {
+    if (!event?._id) return
+    if (event.status !== 'running') return
+    let cancelled = false
+    const tick = () => {
+      if (cancelled) return
+      dispatchChronoSyncAction({}).catch((err: any) =>
+        console.warn('chronoplace dispatchSync failed', err),
+      )
+    }
+    tick()
+    const id = setInterval(tick, 30_000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [event?._id, event?.status])
 
   // Sync event from Convex → admin local state
   useEffect(() => {
@@ -68,8 +135,8 @@ function AdminPage() {
       contact: { email: event.contact?.email || '', phone: event.contact?.phone || '' },
       password: event.adminPassword || a.password,
       replaceAutoWindowSec: event.replaceAutoWindowSec ?? 180,
-      minLapSec: event.minLapSec ?? 165,
-      maxLapSec: event.maxLapSec ?? 480,
+      firstLapDistanceM: (event as any).firstLapDistanceM ?? event.lapDistance ?? 900,
+      testModeDivider: (event as any).testModeDivider ?? 3,
     }))
   }, [event])
 
@@ -115,12 +182,18 @@ function AdminPage() {
       if (prev.replaceAutoWindowSec !== next.replaceAutoWindowSec && next.replaceAutoWindowSec != null) {
         updateReplaceAutoWindowMutation({ eventId: event._id, seconds: next.replaceAutoWindowSec }).catch(console.error)
       }
-      // Lap time bounds (min / max per lap, in seconds)
-      if (prev.minLapSec !== next.minLapSec || prev.maxLapSec !== next.maxLapSec) {
-        updateLapBoundsMutation({
+      // First-lap distance (meters): only the very first lap of the race uses this.
+      if (prev.firstLapDistanceM !== next.firstLapDistanceM && next.firstLapDistanceM != null) {
+        setFirstLapDistanceMutation({
           eventId: event._id,
-          minLapSec: next.minLapSec,
-          maxLapSec: next.maxLapSec,
+          meters: next.firstLapDistanceM,
+        }).catch(console.error)
+      }
+      // Test mode divider (>=1): divides every time-related value when testMode is on.
+      if (prev.testModeDivider !== next.testModeDivider && next.testModeDivider != null) {
+        setTestModeDividerMutation({
+          eventId: event._id,
+          divider: next.testModeDivider,
         }).catch(console.error)
       }
       // Interruptions: detect adds/edits/deletes
@@ -180,6 +253,12 @@ function AdminPage() {
             profileImage: team.profileImage,
             contactName: team.contactName,
             contactPhone: team.contactPhone,
+            chronoplaceSlug: team.chronoplaceSlug,
+            chronoplaceResultsUrl: team.chronoplaceResultsUrl,
+            chronoSyncEnabled: team.chronoSyncEnabled,
+            lastChronoSyncAt: team.lastChronoSyncAt,
+            chronoSyncError: team.chronoSyncError,
+            dossard: team.dossard,
           },
           runners: [],
           order: [],
@@ -388,12 +467,42 @@ function AdminPage() {
           if (!event?._id) throw new Error('Événement non chargé')
           await setRelayTransitionSecMutation({ eventId: event._id, seconds })
         }}
-        lateGraceSec={(event as any)?.lateGraceSec ?? 45}
-        onSetLateGraceSec={async (seconds: number) => {
+        chronoplaceEventId={(event as any)?.chronoplaceEventId}
+        onSetChronoplaceEventId={async (value: number | undefined) => {
           if (!event?._id) throw new Error('Événement non chargé')
-          await setLateGraceSecMutation({ eventId: event._id, seconds })
+          await setChronoplaceEventIdMutation({ eventId: event._id, chronoplaceEventId: value })
         }}
-        testMode={(event as any)?.testMode ?? false}
+        chronoplaceClassementUrl={(event as any)?.chronoplaceClassementUrl}
+        onSetChronoplaceClassementUrl={async (url: string | undefined) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setChronoplaceClassementUrlMutation({ eventId: event._id, url })
+        }}
+        organizerUrl={(event as any)?.organizerUrl}
+        onSetOrganizerUrl={async (url: string | undefined) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setOrganizerUrlMutation({ eventId: event._id, url })
+        }}
+        onSetChronoplaceSlug={async (teamId: string, slug: string | undefined) => {
+          await setChronoplaceSlugMutation({ teamId, slug })
+        }}
+        onSetChronoplaceResultsUrl={async (teamId: string, url: string | undefined) => {
+          await setChronoplaceResultsUrlMutation({ teamId, url })
+        }}
+        onSetDossard={async (teamId: string, dossard: string | undefined) => {
+          await setDossardMutation({ teamId, dossard })
+        }}
+        onSetChronoSyncEnabled={async (teamId: string, enabled: boolean) => {
+          await setChronoSyncEnabledMutation({ teamId, enabled })
+        }}
+        onForceChronoSync={async (teamId: string) => {
+          try {
+            const r = await forceChronoSyncAction({ teamId })
+            return (r ?? null) as any
+          } catch (e: any) {
+            return { ok: false, error: e?.message || 'error' }
+          }
+        }}
+        testMode={(event as any)?.testMode ?? true}
         onSetTestMode={async (value: boolean) => {
           if (!event?._id) throw new Error('Événement non chargé')
           await setTestModeMutation({ eventId: event._id, value })
@@ -402,15 +511,12 @@ function AdminPage() {
           const ev = event as any
           if (!ev) return false
           if (ev.status !== 'scheduled') return true
-          if (ev.scheduledStart && ev.scheduledStart - Date.now() < 10 * 60 * 1000) return true
           return false
         })()}
         testModeLockReason={(() => {
           const ev = event as any
           if (!ev) return undefined
           if (ev.status !== 'scheduled') return 'Course démarrée ou terminée'
-          if (ev.scheduledStart && ev.scheduledStart - Date.now() < 10 * 60 * 1000)
-            return 'Départ dans moins de 10 min'
           return undefined
         })()}
         actualEnd={(event as any)?.actualEnd ?? null}

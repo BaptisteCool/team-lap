@@ -60,6 +60,41 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
   // Get the event by slug
   const event = useQuery('events:getBySlug' as any, { slug: '24h-brette-les-pins-2026' }) as any
 
+  // Presence heartbeat — required to keep server-side burst chain alive
+  // (scheduleNextAutoBurst exits early when hasViewers === false).
+  const presenceBeatMutation = useMutation('presence:beat' as any)
+  useEffect(() => {
+    if (!event?._id) return
+    const sessionId = (() => {
+      try {
+        const k = 'teamlap.presence.sessionId'
+        let v = sessionStorage.getItem(k)
+        if (!v) {
+          v = (crypto as any)?.randomUUID
+            ? crypto.randomUUID()
+            : 's_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+          sessionStorage.setItem(k, v)
+        }
+        return v
+      } catch (_) {
+        return 's_fallback_' + Math.random().toString(36).slice(2)
+      }
+    })()
+    let cancelled = false
+    const tick = () => {
+      if (cancelled) return
+      presenceBeatMutation({ eventId: event._id, sessionId, context: 'home' }).catch(
+        (err: any) => console.warn('presence beat failed', err),
+      )
+    }
+    tick()
+    const id = setInterval(tick, 30_000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [event?._id, presenceBeatMutation])
+
   // Get all teams (+ runners + order) for the event
   const teams = useQuery(
     'teams:getTeamsFull' as any,
@@ -101,58 +136,77 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
     .filter(t => t.ready)
     .map(t => {
       const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position').slice().sort((a, b) => a.timestamp - b.timestamp)
-      const lastLapAt = tLaps.length ? tLaps[tLaps.length - 1].timestamp : raceStartTime
-      const dbCurrent = getDbCurrentRunner(t)
-      // Marker: prefer live pace if its lap is within admin-configured bounds.
-      const minLapMsHome = (event?.minLapSec ?? 165) * 1000
-      const maxLapMsHome = (event?.maxLapSec ?? 480) * 1000
-      const expectedLapMs = (() => {
-        if (!dbCurrent) return kmPaceToLapMs(6, 0)
-        if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
-          const liveLapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec)
-          if (liveLapMs >= minLapMsHome && liveLapMs <= maxLapMsHome) return liveLapMs
-        }
-        return kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
-      })()
-      // If the most recent team lap was a relay, the new runner is in handover
-      // window: marker stays at 0% (sur la ligne) for relayTransitionSec, then progress.
       const lastLap = tLaps.length ? tLaps[tLaps.length - 1] : null
-      const lastWasRelay = lastLap && (lastLap.type === 'relay_manual' || lastLap.type === 'relay_auto')
-      const relayOffsetMs = lastWasRelay ? ((event as any)?.relayTransitionSec ?? 5) * 1000 : 0
-      let progress = 0
-      let inHandoverWindow = false
-      let handoverRemainingSec = 0
+      const lastLapAt = lastLap ? lastLap.timestamp : raceStartTime
+      const dbCurrent = getDbCurrentRunner(t)
+      // Marker position uses Chronoplace's authoritative lapTime when available
+      // (preferred) — the previous lap's duration predicts the current lap. For a
+      // relay lap, strip the 5s handover penalty since that's baked into the previous
+      // lap's lapTime but doesn't apply to the new runner now on track.
+      const relayTransitionMs = ((event as any)?.relayTransitionSec ?? 5) * 1000
+      const minLapMsHome = (event?.minLapSec ?? 5) * 1000
+      const maxLapMsHome = (event?.maxLapSec ?? 3600) * 1000
+      const evTestMode = (event as any)?.testMode === true
+      const evTestDivider = (event as any)?.testModeDivider || 3
+      const compress = evTestMode && evTestDivider > 0 ? evTestDivider : 1
+      const expectedLapMs = (() => {
+        // Priorité 0: nextExpectedLapMs (API connue à l'avance pour le tour en cours)
+        const peek = (t as any).nextExpectedLapMs
+        if (peek && peek > 0) return peek
+        if (lastLap && lastLap.lapTime > 0) {
+          const wasRelay = lastLap.type === 'relay_manual' || lastLap.type === 'relay_auto'
+          const adjusted = wasRelay ? Math.max(1000, lastLap.lapTime - relayTransitionMs) : lastLap.lapTime
+          return adjusted
+        }
+        // No lap yet — fallback static, compressed in test mode pour matcher cadence mock
+        let baseMs: number
+        if (!dbCurrent) baseMs = kmPaceToLapMs(6, 0)
+        else if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
+          const liveLapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec)
+          baseMs = liveLapMs >= minLapMsHome && liveLapMs <= maxLapMsHome
+            ? liveLapMs
+            : kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
+        } else {
+          baseMs = kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
+        }
+        return baseMs / compress
+      })()
+      // Start-line offset: si firstLapDistanceM < lapDistance, le marker démarre
+      // à (lapDist - firstLap)/lapDist du chrono (la ligne de départ est en amont du chrono).
+      const lapDistHome = (event as any)?.lapDistance || 900
+      const firstLapDistHome = (event as any)?.firstLapDistanceM || lapDistHome
+      const startOffset = firstLapDistHome > 0 && firstLapDistHome < lapDistHome
+        ? (lapDistHome - firstLapDistHome) / lapDistHome
+        : 0
+      let progress = startOffset
+      const inHandoverWindow = false
+      const handoverRemainingSec = 0
       if (raceStarted && lastLapAt && expectedLapMs > 0) {
         const elapsedSinceLast = now - lastLapAt
-        if (relayOffsetMs > 0 && elapsedSinceLast < relayOffsetMs) {
-          progress = 0
-          inHandoverWindow = true
-          handoverRemainingSec = Math.max(0, Math.ceil((relayOffsetMs - elapsedSinceLast) / 1000))
+        if (tLaps.length === 0 && startOffset > 0) {
+          // Avant le 1er tour: marker démarre à startOffset et atteint chrono (1.0)
+          // en EXACTEMENT expectedLapMs (= peek mock du tour 1, qui est déjà la durée
+          // réelle du 1er tour 800m, pas besoin de ratio firstLap/lap).
+          const t = Math.min(1, elapsedSinceLast / expectedLapMs)
+          progress = (startOffset + t * (1 - startOffset)) % 1
         } else {
-          progress = ((elapsedSinceLast - relayOffsetMs) / expectedLapMs) % 1
-          if (progress < 0) progress = 0
+          progress = (elapsedSinceLast / expectedLapMs) % 1
         }
+        if (progress < 0) progress = 0
       }
       // Freeze marker just before line when team's cron is paused (runner stopped)
       if (t.autoPaused) progress = 0.92
       // Team finished → marker frozen on line (sportive end)
       if ((t as any).finishedAt) progress = 1
-      // Sublabel: "Nom4 D,DD X/N" — nom coureur tronqué + allure décimale min/km + tour
+      // Sublabel: 2 cas
+      // - Coureur connu (équipe configurée) → "Nom4 M'SS X/N"
+      // - Aucun coureur attribué (équipe chronoplace sans roster) → "M'SS" depuis lastLap (pace brute)
       let subLabel: string | undefined
+      const testMode = (event as any)?.testMode === true
+      const testDivider = (event as any)?.testModeDivider || 3
+      const paceMul = testMode && testDivider > 0 ? testDivider : 1
       if (dbCurrent && !(t as any).finishedAt) {
         const nameShort = (dbCurrent.name || '').slice(0, 4)
-        const minLapMsSub = (event?.minLapSec ?? 165) * 1000
-        const maxLapMsSub = (event?.maxLapSec ?? 480) * 1000
-        let paceMin = dbCurrent.kmMin
-        let paceSec = dbCurrent.kmSec
-        if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
-          const lapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec)
-          if (lapMs >= minLapMsSub && lapMs <= maxLapMsSub) {
-            paceMin = dbCurrent.liveKmMin
-            paceSec = dbCurrent.liveKmSec
-          }
-        }
-        const paceShort = `${paceMin}'${String(paceSec).padStart(2, '0')}`
         // Compte tours du stint courant (depuis dernier relai)
         let lapsThisStint = 0
         for (let i = tLaps.length - 1; i >= 0; i--) {
@@ -164,7 +218,58 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
         const lapsTxt = plannedLapsSub && plannedLapsSub > 0
           ? `${lapsThisStint + 1}/${plannedLapsSub}`
           : `${lapsThisStint + 1}`
-        subLabel = `${nameShort} ${paceShort} ${lapsTxt}`
+        const currentLapNumber = (typeof lastLap?.lapNumber === 'number' ? lastLap.lapNumber : 0) + 1
+        const extras: string[] = [`T${currentLapNumber}`]
+        // Temps + allure du tour EN COURS (= nextExpectedLapMs API mock) en priorité,
+        // sinon fallback sur lastLap (= tour précédent, approximation pour API réelle).
+        const refLapMsRunner = (t as any).nextExpectedLapMs || lastLap?.lapTime || 0
+        if (refLapMsRunner > 0) {
+          const realLapMs = refLapMsRunner * paceMul
+          const totalSec = Math.round(realLapMs / 1000)
+          const lm = Math.floor(totalSec / 60)
+          const ls = totalSec % 60
+          extras.push(`${lm}:${String(ls).padStart(2, '0')}`)
+          const paceSecPerKm = realLapMs / 1000 / 0.9
+          const pm = Math.floor(paceSecPerKm / 60)
+          const ps = Math.round(paceSecPerKm) % 60
+          extras.push(`${pm}'${String(ps).padStart(2, '0')}/km`)
+        }
+        if (lastLap && typeof (lastLap as any).rang === 'number') extras.push(`R${(lastLap as any).rang}`)
+        // Test mode: id chronoplace du tour EN COURS (= nextExpected, pas du précédent)
+        const currentChronoId = (t as any).nextExpectedChronoplaceId
+          ?? ((lastLap as any)?.chronoplaceId)
+        if (evTestMode && typeof currentChronoId === 'number') {
+          extras.push(`#${currentChronoId}`)
+        }
+        subLabel = `${nameShort} ${lapsTxt} · ${extras.join(' · ')}`
+      } else if (!(t as any).finishedAt) {
+        // Pas de coureur attribué — affiche tour en cours + temps au tour + allure/km + rang
+        const lastLapHere = tLaps.length > 0 ? tLaps[tLaps.length - 1] : null
+        // Priorité au tour EN COURS (nextExpectedLapMs API mock) plutôt que précédent
+        const refLapMs = (t as any).nextExpectedLapMs || lastLapHere?.lapTime || 0
+        const parts: string[] = []
+        const currentLapNumber = (typeof lastLapHere?.lapNumber === 'number' ? lastLapHere.lapNumber : 0) + 1
+        parts.push(`T${currentLapNumber}`)
+        if (refLapMs > 0) {
+          // Temps tour réel (décompressé via paceMul) + allure /km
+          const realLapMs = refLapMs * paceMul
+          const totalSec = Math.round(realLapMs / 1000)
+          const lm = Math.floor(totalSec / 60)
+          const ls = totalSec % 60
+          const lapTimeTxt = `${lm}:${String(ls).padStart(2, '0')}`
+          const paceSecPerKm = realLapMs / 1000 / 0.9
+          const pm = Math.floor(paceSecPerKm / 60)
+          const ps = Math.round(paceSecPerKm) % 60
+          const paceTxt = `${pm}'${String(ps).padStart(2, '0')}/km`
+          parts.push(lapTimeTxt, paceTxt)
+        }
+        if (lastLapHere && typeof (lastLapHere as any).rang === 'number') parts.push(`R${(lastLapHere as any).rang}`)
+        const currentChronoIdNo = (t as any).nextExpectedChronoplaceId
+          ?? ((lastLapHere as any)?.chronoplaceId)
+        if (evTestMode && typeof currentChronoIdNo === 'number') {
+          parts.push(`#${currentChronoIdNo}`)
+        }
+        subLabel = parts.join(' · ')
       }
       return {
         id: t._id,
@@ -181,7 +286,7 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
 
   return (
     <div className="page">
-      <TestModeBadge testMode={(event as any)?.testMode} />
+      <TestModeBadge testMode={(event as any)?.testMode} testModeDivider={(event as any)?.testModeDivider} />
       <div className="grid" style={{ gap: 18, maxWidth: 980, margin: '0 auto' }}>
         {/* Carte circuit en haut */}
         <div className="card">
@@ -233,8 +338,8 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
                     ? (() => {
                         if (current.liveKmMin != null && current.liveKmSec != null) {
                           const lapMs = kmPaceToLapMs(current.liveKmMin, current.liveKmSec)
-                          const minMs = (event?.minLapSec ?? 165) * 1000
-                          const maxMs = (event?.maxLapSec ?? 480) * 1000
+                          const minMs = (event?.minLapSec ?? 5) * 1000
+                          const maxMs = (event?.maxLapSec ?? 3600) * 1000
                           if (lapMs >= minMs && lapMs <= maxMs) return fmtKmPace(current.liveKmMin, current.liveKmSec)
                         }
                         return fmtKmPace(current.kmMin, current.kmSec)

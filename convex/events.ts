@@ -1,5 +1,6 @@
 import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import { internal } from './_generated/api'
 import { TEST_MODE_LOCK_WINDOW_MS } from './lib/timings'
 
 // List all events
@@ -95,6 +96,7 @@ export const startRaceNow = mutation({
       updatedAt: Date.now(),
     })
     await snapshotTheoreticalCycles(ctx, args.eventId, lapDistanceM)
+    await bootstrapChronoBurstsForEvent(ctx, args.eventId)
   },
 })
 
@@ -110,8 +112,24 @@ export const startRaceAtScheduled = mutation({
       updatedAt: Date.now(),
     })
     await snapshotTheoreticalCycles(ctx, args.eventId, lapDistanceM)
+    await bootstrapChronoBurstsForEvent(ctx, args.eventId)
   },
 })
+
+// Fan out the first auto-burst for every Chronoplace-enabled team of an event. Called
+// from race start so the polling chain begins immediately.
+async function bootstrapChronoBurstsForEvent(ctx: any, eventId: any) {
+  const teams = await ctx.db
+    .query('teams')
+    .withIndex('by_event', (q: any) => q.eq('eventId', eventId))
+    .collect()
+  for (const t of teams) {
+    if (!t.chronoSyncEnabled || !t.chronoplaceSlug) continue
+    await ctx.scheduler.runAfter(0, internal.chronoplace.scheduleNextAutoBurst, {
+      teamId: t._id,
+    })
+  }
+}
 
 export const stopRace = mutation({
   args: { eventId: v.id('events') },
@@ -301,6 +319,52 @@ export const setLateGraceSec = mutation({
   },
 })
 
+// Set the Chronoplace event id (number) used to build the JSON API URL.
+// Pass 0 or null to clear the value (disables chronoplace sync for all teams of this event).
+export const setChronoplaceEventId = mutation({
+  args: { eventId: v.id('events'), chronoplaceEventId: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const cpId = args.chronoplaceEventId
+    if (cpId !== undefined && (!Number.isFinite(cpId) || cpId < 0)) {
+      throw new ConvexError({
+        code: 'INVALID_CHRONOPLACE_EVENT_ID',
+        message: "L'ID d'événement Chronoplace doit être un entier positif.",
+      })
+    }
+    await ctx.db.patch(args.eventId, {
+      chronoplaceEventId: cpId && cpId > 0 ? Math.round(cpId) : undefined,
+      updatedAt: Date.now(),
+    } as any)
+    return cpId
+  },
+})
+
+// Set the public URL for the Chronoplace general classement.
+export const setChronoplaceClassementUrl = mutation({
+  args: { eventId: v.id('events'), url: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const url = (args.url || '').trim()
+    await ctx.db.patch(args.eventId, {
+      chronoplaceClassementUrl: url.length > 0 ? url : undefined,
+      updatedAt: Date.now(),
+    } as any)
+    return url
+  },
+})
+
+// Set the public URL for the organizer page (Miles Republic etc.).
+export const setOrganizerUrl = mutation({
+  args: { eventId: v.id('events'), url: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const url = (args.url || '').trim()
+    await ctx.db.patch(args.eventId, {
+      organizerUrl: url.length > 0 ? url : undefined,
+      updatedAt: Date.now(),
+    } as any)
+    return url
+  },
+})
+
 // Set max runners per team at event level. Refuses if any team would exceed.
 export const setMaxRunnersPerTeam = mutation({
   args: { eventId: v.id('events'), value: v.number() },
@@ -355,17 +419,25 @@ export const setLatLng = mutation({
   },
 })
 
-export const updateLapBounds = mutation({
-  args: {
-    eventId: v.id('events'),
-    minLapSec: v.optional(v.number()),
-    maxLapSec: v.optional(v.number()),
-  },
+export const setFirstLapDistance = mutation({
+  args: { eventId: v.id('events'), meters: v.number() },
   handler: async (ctx, args) => {
-    const patch: Record<string, any> = { updatedAt: Date.now() }
-    if (args.minLapSec !== undefined) patch.minLapSec = Math.max(0, Math.round(args.minLapSec))
-    if (args.maxLapSec !== undefined) patch.maxLapSec = Math.max(0, Math.round(args.maxLapSec))
-    await ctx.db.patch(args.eventId, patch)
+    const m = Math.max(0, Math.round(args.meters))
+    await ctx.db.patch(args.eventId, {
+      firstLapDistanceM: m > 0 ? m : undefined,
+      updatedAt: Date.now(),
+    } as any)
+  },
+})
+
+export const setTestModeDivider = mutation({
+  args: { eventId: v.id('events'), divider: v.number() },
+  handler: async (ctx, args) => {
+    const d = Math.max(1, Math.round(args.divider))
+    await ctx.db.patch(args.eventId, {
+      testModeDivider: d,
+      updatedAt: Date.now(),
+    } as any)
   },
 })
 

@@ -88,6 +88,66 @@ function TeamPage() {
     event?._id ? { eventId: event._id, provider: weatherProvider } : 'skip',
   ) as any
   const fetchWeatherAction = useAction('weather:fetchWeather' as any)
+  const forceChronoSyncAction = useAction('chronoplace:forceSyncTeam' as any)
+  const presenceBeatMutation = useMutation('presence:beat' as any)
+  const presenceLeaveMutation = useMutation('presence:leave' as any)
+
+  // Presence heartbeat: keeps the server-side burst chain alive while this team
+  // screen is open. See routes/admin.tsx for the same pattern.
+  useEffect(() => {
+    if (!event?._id) return
+    const sessionId = (() => {
+      try {
+        const k = 'teamlap.presence.sessionId'
+        let v = sessionStorage.getItem(k)
+        if (!v) {
+          v = (crypto as any)?.randomUUID
+            ? crypto.randomUUID()
+            : 's_' + Math.random().toString(36).slice(2) + Date.now().toString(36)
+          sessionStorage.setItem(k, v)
+        }
+        return v
+      } catch (_) {
+        return 's_fallback_' + Math.random().toString(36).slice(2)
+      }
+    })()
+    let cancelled = false
+    const tick = () => {
+      if (cancelled) return
+      presenceBeatMutation({
+        eventId: event._id,
+        sessionId,
+        context: 'live:' + (teamId as string),
+      }).catch((err: any) => console.warn('presence beat failed', err))
+    }
+    tick()
+    const id = setInterval(tick, 30_000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+      presenceLeaveMutation({ eventId: event._id, sessionId }).catch(() => {})
+    }
+  }, [event?._id, teamId])
+  // Chronoplace safety-net: poll every 30s while the team screen is open. Server-side
+  // burst chain handles the timely sync; this is a backstop for missed-burst scenarios
+  // (e.g. server restart, scheduling lag).
+  useEffect(() => {
+    if (!teamData?._id) return
+    if (!(teamData as any).chronoSyncEnabled) return
+    let cancelled = false
+    const tick = () => {
+      if (cancelled) return
+      forceChronoSyncAction({ teamId: teamData._id }).catch((err: any) =>
+        console.warn('chronoplace safety-net sync failed', err),
+      )
+    }
+    tick()
+    const id = setInterval(tick, 30_000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [teamData?._id, (teamData as any)?.chronoSyncEnabled])
   // Trigger a refresh when cache is missing or stale (and we have lat/lng).
   React.useEffect(() => {
     if (!event?._id) return
@@ -192,6 +252,12 @@ function TeamPage() {
         profileImage: teamData.profileImage,
         contactName: teamData.contactName,
         contactPhone: teamData.contactPhone,
+        chronoSyncEnabled: teamData.chronoSyncEnabled,
+        chronoplaceSlug: teamData.chronoplaceSlug,
+        chronoSyncError: teamData.chronoSyncError,
+        lastChronoSyncAt: teamData.lastChronoSyncAt,
+        nextExpectedChronoplaceId: teamData.nextExpectedChronoplaceId,
+        nextExpectedLapMs: teamData.nextExpectedLapMs,
       })
       if (teamData.runners && teamData.runners.length > 0) {
         const augmented = teamData.runners.map((r: any, idx: number) => ({
@@ -389,7 +455,7 @@ function TeamPage() {
 
   return (
     <div className={`page ${readonly ? 'is-readonly' : ''}`}>
-      <TestModeBadge testMode={(event as any)?.testMode} />
+      <TestModeBadge testMode={(event as any)?.testMode} testModeDivider={(event as any)?.testModeDivider} />
       <div className="grid" style={{ gap: 14, maxWidth: 1280, margin: '0 auto' }}>
         <div className="card" style={{ padding: '8px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -477,8 +543,8 @@ function TeamPage() {
             runners={runners}
             setRunners={setRunnersPersist}
             onContinue={() => setActiveTab('planning')}
-            minLapSec={(event as any)?.minLapSec ?? 165}
-            maxLapSec={(event as any)?.maxLapSec ?? 480}
+            minLapSec={(event as any)?.minLapSec ?? 5}
+            maxLapSec={(event as any)?.maxLapSec ?? 3600}
             maxRunnersPerTeam={(event as any)?.maxRunnersPerTeam ?? 10}
             canDeleteRunner={(event as any)?.status === 'scheduled'}
           />
@@ -508,8 +574,8 @@ function TeamPage() {
               return count
             })()}
             currentRunnerExpectedLapMs={(() => {
-              const minLap = ((event as any)?.minLapSec ?? 165) * 1000
-              const maxLap = ((event as any)?.maxLapSec ?? 480) * 1000
+              const minLap = ((event as any)?.minLapSec ?? 5) * 1000
+              const maxLap = ((event as any)?.maxLapSec ?? 3600) * 1000
               const cR = (runners as any[]).find((r) => r.id === order[(teamData?.currentIdx || 0) % Math.max(1, order.length)])
               if (!cR) return 0
               if (cR.liveKmMin != null && cR.liveKmSec != null) {
@@ -605,7 +671,7 @@ function TeamPage() {
               )
             }}
             replaceAutoWindowSec={(event as any)?.replaceAutoWindowSec ?? 180}
-            minLapSec={(event as any)?.minLapSec ?? 165}
+            minLapSec={(event as any)?.minLapSec ?? 5}
             relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
             scheduledEnd={(event as any)?.scheduledEnd ?? null}
             teamFinishedAt={(teamData as any)?.finishedAt ?? null}
@@ -629,8 +695,8 @@ function TeamPage() {
             laps={lapsData || []}
             raceStartTime={event?.actualStart || null}
             raceStarted={race.started}
-            minLapSec={(event as any)?.minLapSec ?? 165}
-            maxLapSec={(event as any)?.maxLapSec ?? 480}
+            minLapSec={(event as any)?.minLapSec ?? 5}
+            maxLapSec={(event as any)?.maxLapSec ?? 3600}
             relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}
             ranking={readonly ? undefined : ranking}
             setRanking={readonly ? undefined : setRanking}
@@ -648,37 +714,6 @@ function TeamPage() {
                 type: payload.type,
               }).catch((err: any) => console.error('updateLap:', err))
               if (payload.energy != null && teamData?._id) {
-                const r = (runners as any[]).find((x) => x.id === payload.runnerId)
-                if (r) {
-                  upsertRunnerMutation({
-                    teamId: teamData._id,
-                    runner: { ...r, energy: payload.energy },
-                  }).catch((err: any) => console.error('upsertRunner energy:', err))
-                }
-              }
-            }}
-            onAddBulkRelay={readonly ? undefined : (p) => {
-              if (!teamData?._id) return
-              addBulkRelayMutation({
-                teamId: teamData._id,
-                runnerId: p.runnerId,
-                lapTimeMs: p.lapTimeMs,
-                anchorMs: p.anchorMs,
-                anchorKind: p.anchorKind,
-                nbLaps: p.nbLaps,
-                approximate: p.approximate,
-              }).catch((err: any) => console.error('addBulkRelay:', err))
-            }}
-            onInsertLap={readonly ? undefined : (payload) => {
-              if (!teamData?._id) return
-              insertLapAtMutation({
-                teamId: teamData._id,
-                runnerId: payload.runnerId,
-                timestamp: payload.timestamp,
-                type: payload.type,
-                forcedExtra: payload.forcedExtra,
-              }).catch((err: any) => console.error('insertLapAt:', err))
-              if (payload.energy != null) {
                 const r = (runners as any[]).find((x) => x.id === payload.runnerId)
                 if (r) {
                   upsertRunnerMutation({
