@@ -101,12 +101,22 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
     .filter(t => t.ready)
     .map(t => {
       const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position').slice().sort((a, b) => a.timestamp - b.timestamp)
-      const lastLapAt = tLaps.length ? tLaps[tLaps.length - 1].timestamp : raceStartTime
+      const lastLap = tLaps.length ? tLaps[tLaps.length - 1] : null
+      const lastLapAt = lastLap ? lastLap.timestamp : raceStartTime
       const dbCurrent = getDbCurrentRunner(t)
-      // Marker: prefer live pace if its lap is within admin-configured bounds.
-      const minLapMsHome = (event?.minLapSec ?? 165) * 1000
-      const maxLapMsHome = (event?.maxLapSec ?? 480) * 1000
+      // Marker position uses Chronoplace's authoritative lapTime when available
+      // (preferred) — the previous lap's duration predicts the current lap. For a
+      // relay lap, strip the 5s handover penalty since that's baked into the previous
+      // lap's lapTime but doesn't apply to the new runner now on track.
+      const relayTransitionMs = ((event as any)?.relayTransitionSec ?? 5) * 1000
+      const minLapMsHome = (event?.minLapSec ?? 5) * 1000
+      const maxLapMsHome = (event?.maxLapSec ?? 3600) * 1000
       const expectedLapMs = (() => {
+        if (lastLap && lastLap.lapTime > 0) {
+          const wasRelay = lastLap.type === 'relay_manual' || lastLap.type === 'relay_auto'
+          const adjusted = wasRelay ? Math.max(1000, lastLap.lapTime - relayTransitionMs) : lastLap.lapTime
+          return adjusted
+        }
         if (!dbCurrent) return kmPaceToLapMs(6, 0)
         if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
           const liveLapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec)
@@ -114,24 +124,13 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
         }
         return kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
       })()
-      // If the most recent team lap was a relay, the new runner is in handover
-      // window: marker stays at 0% (sur la ligne) for relayTransitionSec, then progress.
-      const lastLap = tLaps.length ? tLaps[tLaps.length - 1] : null
-      const lastWasRelay = lastLap && (lastLap.type === 'relay_manual' || lastLap.type === 'relay_auto')
-      const relayOffsetMs = lastWasRelay ? ((event as any)?.relayTransitionSec ?? 5) * 1000 : 0
       let progress = 0
-      let inHandoverWindow = false
-      let handoverRemainingSec = 0
+      const inHandoverWindow = false
+      const handoverRemainingSec = 0
       if (raceStarted && lastLapAt && expectedLapMs > 0) {
         const elapsedSinceLast = now - lastLapAt
-        if (relayOffsetMs > 0 && elapsedSinceLast < relayOffsetMs) {
-          progress = 0
-          inHandoverWindow = true
-          handoverRemainingSec = Math.max(0, Math.ceil((relayOffsetMs - elapsedSinceLast) / 1000))
-        } else {
-          progress = ((elapsedSinceLast - relayOffsetMs) / expectedLapMs) % 1
-          if (progress < 0) progress = 0
-        }
+        progress = (elapsedSinceLast / expectedLapMs) % 1
+        if (progress < 0) progress = 0
       }
       // Freeze marker just before line when team's cron is paused (runner stopped)
       if (t.autoPaused) progress = 0.92
@@ -141,8 +140,8 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
       let subLabel: string | undefined
       if (dbCurrent && !(t as any).finishedAt) {
         const nameShort = (dbCurrent.name || '').slice(0, 4)
-        const minLapMsSub = (event?.minLapSec ?? 165) * 1000
-        const maxLapMsSub = (event?.maxLapSec ?? 480) * 1000
+        const minLapMsSub = (event?.minLapSec ?? 5) * 1000
+        const maxLapMsSub = (event?.maxLapSec ?? 3600) * 1000
         let paceMin = dbCurrent.kmMin
         let paceSec = dbCurrent.kmSec
         if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
@@ -233,8 +232,8 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
                     ? (() => {
                         if (current.liveKmMin != null && current.liveKmSec != null) {
                           const lapMs = kmPaceToLapMs(current.liveKmMin, current.liveKmSec)
-                          const minMs = (event?.minLapSec ?? 165) * 1000
-                          const maxMs = (event?.maxLapSec ?? 480) * 1000
+                          const minMs = (event?.minLapSec ?? 5) * 1000
+                          const maxMs = (event?.maxLapSec ?? 3600) * 1000
                           if (lapMs >= minMs && lapMs <= maxMs) return fmtKmPace(current.liveKmMin, current.liveKmSec)
                         }
                         return fmtKmPace(current.kmMin, current.kmSec)

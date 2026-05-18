@@ -1,5 +1,6 @@
 import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import { internal } from './_generated/api'
 
 export const DEFAULT_MAX_RUNNERS_PER_TEAM = 10
 
@@ -114,6 +115,51 @@ export const setAutoPaused = mutation({
   args: { teamId: v.id('teams'), paused: v.boolean() },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.teamId, { autoPaused: args.paused, updatedAt: Date.now() })
+  },
+})
+
+// ─── Chronoplace sync ──────────────────────────────────────────────────────
+
+// Set or clear the Chronoplace slug for a team. Empty string clears.
+export const setChronoplaceSlug = mutation({
+  args: { teamId: v.id('teams'), slug: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const cleaned = (args.slug ?? '').trim()
+    await ctx.db.patch(args.teamId, {
+      chronoplaceSlug: cleaned.length > 0 ? cleaned : undefined,
+      updatedAt: Date.now(),
+    } as any)
+  },
+})
+
+// Toggle Chronoplace sync for a team. When enabled, manual clicks arm a burst-poll
+// of the Chronoplace API and the team's auto-pass chain takes over from server crons.
+export const setChronoSyncEnabled = mutation({
+  args: { teamId: v.id('teams'), enabled: v.boolean() },
+  handler: async (ctx, args) => {
+    const patch: Record<string, any> = {
+      chronoSyncEnabled: args.enabled,
+      updatedAt: Date.now(),
+    }
+    if (!args.enabled) {
+      // Clear stale error/alert state so re-enabling later starts clean. Also clear any
+      // active burst so a future enable starts fresh.
+      patch.chronoSyncError = undefined
+      patch.chronoAlertSentAt = undefined
+      patch.pendingPollBurst = undefined
+    }
+    await ctx.db.patch(args.teamId, patch as any)
+
+    // Bootstrap the auto-burst chain when enabling on a running event.
+    if (args.enabled) {
+      const team = await ctx.db.get(args.teamId)
+      const event = team ? await ctx.db.get(team.eventId) : null
+      if (event && event.status === 'running' && !(event as any).actualEnd) {
+        await ctx.scheduler.runAfter(0, internal.chronoplace.scheduleNextAutoBurst, {
+          teamId: args.teamId,
+        })
+      }
+    }
   },
 })
 

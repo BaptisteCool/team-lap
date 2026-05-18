@@ -74,7 +74,17 @@ interface LiveScreenProps {
   ranking?: Ranking
   setRanking?: React.Dispatch<React.SetStateAction<Ranking>>
   onBack: () => void
-  team?: { name?: string; color?: string; ready?: boolean; autoPaused?: boolean; groupModeQueue?: Array<{ groupName: string; remainingRelays: number; status: 'active' | 'pending' }> }
+  team?: {
+    name?: string
+    color?: string
+    ready?: boolean
+    autoPaused?: boolean
+    groupModeQueue?: Array<{ groupName: string; remainingRelays: number; status: 'active' | 'pending' }>
+    chronoSyncEnabled?: boolean
+    chronoplaceSlug?: string
+    lastChronoSyncAt?: number
+    chronoSyncError?: string
+  }
   setTeamReady?: (ready: boolean) => void
   onRecordLap?: (change: boolean, runnerId: string) => Promise<{ docId?: any; lapId?: string } | unknown> | void
   onUndoLap?: (docId: string) => void
@@ -328,10 +338,19 @@ export function LiveScreen({
     setPickerOpen(null)
   }
 
-  // Expected lap duration: prefer liveKm (auto-calibrated from last manual Top) — manual
-  // laps are user-validated so we trust the value even if it falls outside admin bounds.
-  // On relay, server clears liveKm → fallback to configured target (kmMin/kmSec).
+  // Expected lap duration: prefer the previous lap's actual lapTime (Chronoplace
+  // authoritative when team is on Chronoplace) — for a relay lap, strip the 5s
+  // handover penalty since it doesn't apply to the new runner now on track. Fallback
+  // to liveKm pace then to configured target.
   const expectedLapMs = (() => {
+    const lastReal = realLaps[realLaps.length - 1]
+    if (lastReal && lastReal.lapTime > 0) {
+      const wasRelay = lastReal.type === 'relay_manual' || lastReal.type === 'relay_auto'
+      const adjusted = wasRelay
+        ? Math.max(1000, lastReal.lapTime - relayTransitionSec * 1000)
+        : lastReal.lapTime
+      return adjusted
+    }
     if (!currentRunner) return 0
     if (currentRunner.liveKmMin != null && currentRunner.liveKmSec != null) {
       const liveLapMs = kmPaceToLapMs(currentRunner.liveKmMin, currentRunner.liveKmSec)
@@ -376,6 +395,44 @@ export function LiveScreen({
         {/* Left column — hero */}
         <div className="grid" style={{ gap: 18, alignContent: 'start' }}>
           <div className="hero-card">
+            {team?.chronoSyncEnabled && (() => {
+              const lastSync = team.lastChronoSyncAt
+              const err = team.chronoSyncError
+              const ageSec = typeof lastSync === 'number' ? Math.max(0, Math.round((now - lastSync) / 1000)) : null
+              const status: 'ok' | 'warn' | 'err' = err
+                ? 'err'
+                : ageSec !== null && ageSec > 120
+                  ? 'warn'
+                  : 'ok'
+              const color = status === 'err' ? 'oklch(0.72 0.21 25)' : status === 'warn' ? 'oklch(0.84 0.18 70)' : 'oklch(0.86 0.20 135)'
+              const icon = status === 'err' ? '🔴' : status === 'warn' ? '🟠' : '🟢'
+              const label = status === 'err' ? `Erreur · ${err}` : status === 'warn' ? `Silence > 2min` : 'OK'
+              return (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 10px',
+                    marginBottom: 8,
+                    background: 'var(--bg-2)',
+                    border: `1px solid ${color}`,
+                    borderRadius: 8,
+                    fontSize: 12,
+                    color: 'var(--text-2)',
+                  }}
+                  title="Sync Chronoplace active sur cette équipe"
+                >
+                  <span>{icon}</span>
+                  <span style={{ fontWeight: 600, color }}>Sync Chronoplace · {label}</span>
+                  {ageSec !== null && status !== 'err' && (
+                    <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7 }}>
+                      il y a {ageSec}s
+                    </span>
+                  )}
+                </div>
+              )
+            })()}
             <div className="progress-track"><div className="progress-fill" style={{ width: `${progress * 100}%` }} /></div>
             <div style={{ display: 'flex', gap: 18, marginTop: 14, flexWrap: 'wrap', color: 'var(--muted)', fontSize: 13 }}>
               <span>📍 {(totalDistanceM / 1000).toFixed(2)} km parcourus</span>
@@ -613,6 +670,8 @@ export function LiveScreen({
                         const expectedMs = kmPaceToLapMs(currentRunner.kmMin, currentRunner.kmSec)
                         const abnormal = expectedMs > 0 && l.lapTime > expectedMs * 2
                         const isAuto = l.type === 'checkpoint_auto' || l.type === 'relay_auto'
+                        const isChrono = !!(l as any).chronoplaceId || (l as any).source === 'chronoplace'
+                        const isCorrected = !!(l as any).correctedByChronoplace
                         // Snapshot of planned-at-start (immune to runner config edits)
                         const planAtStart = (relayLaps[0] as any)?.plannedAtStart ?? plannedLaps
                         // 'tour +' = manual checkpoint beyond planned (relai aurait dû être pris)
@@ -625,16 +684,36 @@ export function LiveScreen({
                               style={{
                                 fontSize: 9,
                                 padding: '1px 5px',
-                                background: isAuto
-                                  ? 'oklch(0.72 0.18 200 / 0.18)'
-                                  : 'oklch(0.86 0.20 135 / 0.18)',
-                                color: isAuto
-                                  ? 'oklch(0.78 0.16 200)'
-                                  : 'oklch(0.92 0.20 135)',
+                                background: isChrono
+                                  ? 'oklch(0.78 0.18 165 / 0.18)'
+                                  : isAuto
+                                    ? 'oklch(0.72 0.18 200 / 0.18)'
+                                    : 'oklch(0.86 0.20 135 / 0.18)',
+                                color: isChrono
+                                  ? 'oklch(0.85 0.16 165)'
+                                  : isAuto
+                                    ? 'oklch(0.78 0.16 200)'
+                                    : 'oklch(0.92 0.20 135)',
                               }}
+                              title={isChrono ? 'Tour synchronisé depuis Chronoplace' : isAuto ? 'Tour auto (cron team-lap)' : 'Tour manuel'}
                             >
-                              {isAuto ? 'AUTO' : 'MAN.'}
+                              {isChrono ? 'CHRONO' : isAuto ? 'AUTO' : 'MAN.'}
                             </span>
+                            {isCorrected && (
+                              <span
+                                className="badge mono"
+                                style={{
+                                  fontSize: 9,
+                                  padding: '1px 5px',
+                                  background: 'oklch(0.78 0.18 165 / 0.12)',
+                                  color: 'oklch(0.85 0.16 165)',
+                                  border: '1px solid oklch(0.78 0.18 165 / 0.4)',
+                                }}
+                                title="Tour manuel écrasé par la donnée Chronoplace officielle"
+                              >
+                                ✓ corrigé
+                              </span>
+                            )}
                             {extraPassage && (
                               <span
                                 className="badge mono"
@@ -949,14 +1028,9 @@ export function LiveScreen({
                   progress={(() => {
                     if (!race.started || expectedLapMs <= 0) return undefined
                     if (team?.autoPaused) return 0.92
-                    // Relay handover freeze: marker stays at line for relayTransitionSec
-                    // after a relay_* lap (handover between runners).
-                    const lastIsRelay =
-                      effLastLap && (effLastLap.type === 'relay_manual' || effLastLap.type === 'relay_auto')
-                    const offsetMs = lastIsRelay ? relayTransitionSec * 1000 : 0
-                    if (offsetMs > 0 && effCurrentLapMs < offsetMs) return 0
-                    const progressMs = Math.max(0, effCurrentLapMs - offsetMs)
-                    return (progressMs / expectedLapMs) % 1
+                    // expectedLapMs already strips the 5s handover when the previous lap
+                    // was a relay — no extra freeze window needed.
+                    return (effCurrentLapMs / expectedLapMs) % 1
                   })()}
                 />
               </div>
