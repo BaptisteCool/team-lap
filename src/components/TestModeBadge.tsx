@@ -1,11 +1,13 @@
 interface TestModeBadgeProps {
   testMode?: boolean
+  testModeDivider?: number
 }
 
 // Banner full-width destructif → MODE TEST omniprésent (Admin/Live/Home/Planning/History)
 // Auto-hides quand testMode === false ou undefined.
-export function TestModeBadge({ testMode }: TestModeBadgeProps) {
+export function TestModeBadge({ testMode, testModeDivider }: TestModeBadgeProps) {
   if (!testMode) return null
+  const divider = testModeDivider && testModeDivider > 0 ? testModeDivider : 3
   return (
     <div
       style={{
@@ -25,10 +27,10 @@ export function TestModeBadge({ testMode }: TestModeBadgeProps) {
         justifyContent: 'center',
       }}
       role="status"
-      title="Timings raccourcis pour tests (5s minLap, 30s maxLap, 3s replaceAuto, 2s relayTransition)"
+      title={`Timings raccourcis pour tests · divisés par ${divider}× (24h jouée en ${(24 / divider).toFixed(1)}h)`}
     >
       <span>⚠</span>
-      <span>MODE TEST · Timings fictifs</span>
+      <span>MODE TEST · Timings ÷ {divider}</span>
       <span>⚠</span>
     </div>
   )

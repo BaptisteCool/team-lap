@@ -92,6 +92,12 @@ export default defineSchema({
     // wanting auto-sync from Chronoplace.
     chronoplaceEventId: v.optional(v.number()),
 
+    // Public URL to the Chronoplace general classement page (visitors / public sharing).
+    chronoplaceClassementUrl: v.optional(v.string()),
+
+    // Public URL to the organizer page (Miles Republic etc.).
+    organizerUrl: v.optional(v.string()),
+
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -160,6 +166,10 @@ export default defineSchema({
     //   GET https://www.chronoplace.fr/api/classement_live_endurance-detail/{eventId}/{slug}
     // When chronoSyncEnabled === true, autoTick skips this team (Chronoplace is source of truth).
     chronoplaceSlug: v.optional(v.string()),
+    // Bib number (dossard) — editable in admin before race start, displayed in UI/badges.
+    dossard: v.optional(v.string()),
+    // Public URL to the team-specific Chronoplace results page (shareable, opens new tab).
+    chronoplaceResultsUrl: v.optional(v.string()),
     chronoSyncEnabled: v.optional(v.boolean()),
     // Timestamp ms of the last cron tick that ran for this team (success or error).
     lastChronoSyncAt: v.optional(v.number()),
@@ -167,6 +177,12 @@ export default defineSchema({
     chronoSyncError: v.optional(v.string()),
     // Anti-spam: timestamp ms of the last Telegram alert sent — reset on next successful lap.
     chronoAlertSentAt: v.optional(v.number()),
+    // Mock testMode: pré-calcul du lapTime exact du prochain tour (compressé) depuis
+    // les données API connues à l'avance. Utilisé par les markers frontend pour
+    // animer à la cadence EXACTE du tour en cours (pas juste prédire depuis le précédent).
+    nextExpectedLapMs: v.optional(v.number()),
+    // Mock testMode: id Chronoplace du prochain tour (= tour en cours d'exécution).
+    nextExpectedChronoplaceId: v.optional(v.number()),
 
     // Active Chronoplace polling burst (server-scheduled via ctx.scheduler).
     // Manual burst: triggered by a user click (passage/relai). Polls every 3s up to 6×.
@@ -302,6 +318,8 @@ export default defineSchema({
     chronoplaceId: v.optional(v.number()),
     source: v.optional(v.string()),
     correctedByChronoplace: v.optional(v.boolean()),
+    // Chronoplace classement rang (position) à ce tour — affiché sur le marker map.
+    rang: v.optional(v.number()),
   })
     .index('by_team', ['teamId'])
     .index('by_team_runner', ['teamId', 'runnerId'])

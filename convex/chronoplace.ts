@@ -8,7 +8,8 @@ import {
 } from './lib/chronoplace'
 import { computeNextRunnerIdx, consumeQueueOnRelay, type GroupModeEntry } from './lib/nextRunner'
 import { getEffectiveTimings } from './lib/timings'
-import { buildMockHeroesAcademyResponse, shouldUseMockChronoplace } from './lib/mockChronoplace'
+import { buildMockChronoplaceResponse, getMockLapMeta, getMockNextLapTimeMs, shouldUseMockChronoplace } from './lib/mockChronoplace'
+import { getMockRunnerForLap, getMockStintLengthForLap, isMockRelayLap } from './lib/mockChronoplaceSchedule'
 
 // Min lap gap floor — also used to guard pace calibration against double-tap garbage.
 const MIN_LAP_GAP_MS = 5000
@@ -19,17 +20,20 @@ const LAP_DISTANCE_M = 900
 // the manual chain is started immediately on user click. In test mode, `maxAttempts`
 // is divided by `testModeDivider` so the polling window shrinks proportionally to the
 // compressed lap durations.
-const POLL_INTERVAL_MS = 3000
-const MAX_AUTO_ATTEMPTS_BASE = 12
-const MAX_MANUAL_ATTEMPTS_BASE = 6
+const POLL_INTERVAL_MS = 1000
+const MAX_AUTO_ATTEMPTS_BASE = 36
+const MAX_MANUAL_ATTEMPTS_BASE = 30
 // Stuck-team retry: after the burst window expires without finding a lap, the runner is
 // presumed stopped or has lost their Chronoplace chip. We pause the team and retry once
 // every 60s until a new lap is published; on success the chain returns to normal cadence.
 const STUCK_RETRY_INTERVAL_MS = 60000
 
 function maxAttemptsForBurst(type: 'manual' | 'auto', divider: number): number {
-  const base = type === 'manual' ? MAX_MANUAL_ATTEMPTS_BASE : MAX_AUTO_ATTEMPTS_BASE
-  return Math.max(1, Math.round(base / Math.max(1, divider)))
+  // Manual click polling: 30 attempts × 1s = 30s window REGARDLESS of testModeDivider
+  // (user-driven, doit pouvoir attendre la vraie valeur même en mode compressé).
+  // Auto chain: scale par divider (cadence compressée en test).
+  if (type === 'manual') return MAX_MANUAL_ATTEMPTS_BASE
+  return Math.max(1, Math.round(MAX_AUTO_ATTEMPTS_BASE / Math.max(1, divider)))
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -57,7 +61,7 @@ async function fetchChronoplaceLaps(sctx: {
 }): Promise<{ ok: true; body: unknown[] } | { ok: false; error: string }> {
   if (shouldUseMockChronoplace(sctx.chronoplaceSlug, sctx.testMode)) {
     const divider = sctx.testModeDivider && sctx.testModeDivider > 0 ? sctx.testModeDivider : 3
-    const body = buildMockHeroesAcademyResponse(sctx.actualStart || 0, Date.now(), divider)
+    const body = buildMockChronoplaceResponse(sctx.chronoplaceSlug || '', sctx.actualStart || 0, Date.now(), divider)
     return { ok: true, body }
   }
   if (!sctx.chronoplaceEventId || !sctx.chronoplaceSlug) {
@@ -163,12 +167,13 @@ export const applyChronoplaceLap = internalMutation({
     lapNumber: v.number(),
     lapTimeMs: v.number(),
     createdAtMs: v.number(),
+    rang: v.optional(v.number()),
     manualTag: v.optional(v.object({
       kind: v.union(v.literal('pass'), v.literal('relay')),
       runnerId: v.optional(v.string()),
     })),
   },
-  handler: async (ctx, { teamId, chronoplaceId, lapNumber, lapTimeMs, createdAtMs, manualTag }) => {
+  handler: async (ctx, { teamId, chronoplaceId, lapNumber, lapTimeMs, createdAtMs, rang, manualTag }) => {
     // 1) Idempotence: skip if we already have a lap with this Chronoplace id.
     const existingByChrono = await ctx.db
       .query('laps')
@@ -183,30 +188,60 @@ export const applyChronoplaceLap = internalMutation({
       .query('runners')
       .withIndex('by_team', (q) => q.eq('teamId', teamId))
       .collect()
-    if (runners.length === 0) return { kind: 'skip', reason: 'no_runners' as const }
+    // Équipe sans runner configuré (ex: équipes mock autres que Heroes) → on insère
+    // quand même le lap avec runnerId vide pour conserver le timing + progress map,
+    // mais sans calibration pace ni avance currentIdx.
+    const noRunners = runners.length === 0
 
     const orderDoc = await ctx.db
       .query('teamOrder')
       .withIndex('by_team', (q) => q.eq('teamId', teamId))
       .first()
-    const orderArr: string[] =
-      orderDoc && orderDoc.order && orderDoc.order.length > 0
-        ? orderDoc.order
-        : runners.map((r: any) => r.id)
-    if (orderArr.length === 0) return { kind: 'skip', reason: 'no_order' as const }
+    const orderArr: string[] = noRunners
+      ? []
+      : (orderDoc && orderDoc.order && orderDoc.order.length > 0
+          ? orderDoc.order
+          : runners.map((r: any) => r.id))
 
-    const currentRunnerLocalId = orderArr[(team.currentIdx || 0) % orderArr.length]
-    const targetRunnerLocalId =
-      manualTag?.runnerId && runners.some((r: any) => r.id === manualTag.runnerId)
-        ? manualTag.runnerId
-        : currentRunnerLocalId
-    const runnerForLap = runners.find((r: any) => r.id === targetRunnerLocalId)
-    if (!runnerForLap) return { kind: 'skip', reason: 'no_runner' as const }
+    // Pas de wrap: si currentIdx >= order.length, on a consommé tous les coureurs prévus
+    // et les laps suivants restent non-attribués (continue sur la carte sans coureur connu).
+    const currentIdxRaw = team.currentIdx || 0
+    const currentRunnerLocalId = orderArr.length > 0 && currentIdxRaw < orderArr.length
+      ? orderArr[currentIdxRaw]
+      : ''
 
-    // Decide isRelay. Manual tag forces the decision; otherwise derive from stint progress.
+    // Mock mode (Heroes Academy testMode): runner attribution + relay detection
+    // use a pre-baked schedule that mirrors the real race plan (night group split,
+    // Pascal absentee coverage, variable Simon stint lengths). See mockChronoplaceSchedule.ts.
+    const eventForMock = await ctx.db.get(team.eventId)
+    const isMock = shouldUseMockChronoplace(
+      (team as any).chronoplaceSlug,
+      (eventForMock as any)?.testMode,
+    )
+    const mockRunnerName = isMock && !noRunners ? getMockRunnerForLap(lapNumber) : null
+    const mockTargetLocalId = (() => {
+      if (!mockRunnerName) return null
+      const found = runners.find((r: any) => r.name === mockRunnerName)
+      return found ? found.id : null
+    })()
+
+    const targetRunnerLocalId = noRunners
+      ? ''
+      : (manualTag?.runnerId && runners.some((r: any) => r.id === manualTag.runnerId)
+          ? manualTag.runnerId
+          : (mockTargetLocalId || currentRunnerLocalId))
+    const runnerForLap = noRunners ? null : runners.find((r: any) => r.id === targetRunnerLocalId)
+    if (!noRunners && !runnerForLap) return { kind: 'skip', reason: 'no_runner' as const }
+
+    // Decide isRelay. Manual tag forces the decision; mock uses schedule; else derive from stint progress.
+    // Pour équipe sans runner, pas de relai computable.
     let isRelay: boolean
-    if (manualTag) {
+    if (noRunners) {
+      isRelay = false
+    } else if (manualTag) {
       isRelay = manualTag.kind === 'relay'
+    } else if (isMock && mockRunnerName) {
+      isRelay = isMockRelayLap(lapNumber)
     } else {
       const allTeamLaps = await ctx.db
         .query('laps')
@@ -218,7 +253,7 @@ export const applyChronoplaceLap = internalMutation({
         if (l.type === 'relay_manual' || l.type === 'relay_auto') break
         if (l.runnerId === currentRunnerLocalId) lapsThisStint++
       }
-      const planned = (runnerForLap as any).plannedLaps ?? 4
+      const planned = (runnerForLap as any)?.plannedLaps ?? 4
       isRelay = lapsThisStint + 1 >= planned
     }
     const lapType: 'checkpoint_manual' | 'relay_manual' | 'checkpoint_auto' | 'relay_auto' = manualTag
@@ -241,6 +276,7 @@ export const applyChronoplaceLap = internalMutation({
         correctedByChronoplace: wasManual ? true : (existingByLapNumber as any).correctedByChronoplace,
         lapTime: lapTimeMs,
         timestamp: createdAtMs,
+        rang,
       }
       // Manual tag should also update lap type + runnerId on the existing lap (the user just
       // expressed intent post-hoc) — but only for tag-driven calls (auto chain preserves).
@@ -257,6 +293,11 @@ export const applyChronoplaceLap = internalMutation({
       const prevGroupModeQueue = ((team as any).groupModeQueue || undefined) as GroupModeEntry[] | undefined
       const event = await ctx.db.get(team.eventId)
       const tApply = getEffectiveTimings(event)
+      // Mock: snapshot plannedAtStart from schedule stint length (varies per relais),
+      // else use runner static plannedLaps. Si pas de runnerForLap → undefined.
+      const plannedAtStartForLap = isMock
+        ? (getMockStintLengthForLap(lapNumber) ?? (runnerForLap as any)?.plannedLaps)
+        : (runnerForLap as any)?.plannedLaps
       const docId = await ctx.db.insert('laps', {
         teamId,
         runnerId: targetRunnerLocalId,
@@ -267,10 +308,11 @@ export const applyChronoplaceLap = internalMutation({
         type: lapType,
         autoRelay: isRelay && !manualTag ? true : undefined,
         prevCurrentIdx,
-        plannedAtStart: (runnerForLap as any).plannedLaps ?? undefined,
+        plannedAtStart: plannedAtStartForLap,
         prevGroupModeQueue,
         source: 'chronoplace',
         chronoplaceId,
+        rang,
         relayTransitionMsApplied: isRelay ? tApply.relayTransitionSec * 1000 : undefined,
       } as any)
       lapId = docId
@@ -280,12 +322,15 @@ export const applyChronoplaceLap = internalMutation({
     // - Regular lap: liveKm tracks the running pace directly from lapTime.
     // - Relay lap: lapTime includes the 5s handover → strip it for liveKm (pure run pace)
     //   and store the full lapTime separately as theoreticalRelayPace.
-    if (lapTimeMs >= MIN_LAP_GAP_MS) {
+    // En test mode, lapTimeMs est compressé par testModeDivider → on multiplie pour
+    // que la pace stockée reflète l'allure réelle (pas la version accélérée).
+    if (lapTimeMs >= MIN_LAP_GAP_MS && runnerForLap) {
       const event = await ctx.db.get(team.eventId)
       const tApply = getEffectiveTimings(event)
+      const realLapMs = tApply.testMode ? lapTimeMs * tApply.testModeDivider : lapTimeMs
       if (isRelay) {
-        const relayPace = kmPaceFromLapMs(lapTimeMs)
-        const stripped = Math.max(MIN_LAP_GAP_MS, lapTimeMs - tApply.relayTransitionSec * 1000)
+        const relayPace = kmPaceFromLapMs(realLapMs)
+        const stripped = Math.max(MIN_LAP_GAP_MS, realLapMs - tApply.relayTransitionSec * 1000)
         const livePace = kmPaceFromLapMs(stripped)
         await ctx.db.patch(runnerForLap._id, {
           theoreticalRelayPaceMin: relayPace.min,
@@ -294,7 +339,7 @@ export const applyChronoplaceLap = internalMutation({
           liveKmSec: livePace.sec,
         } as any)
       } else {
-        const livePace = kmPaceFromLapMs(lapTimeMs)
+        const livePace = kmPaceFromLapMs(realLapMs)
         await ctx.db.patch(runnerForLap._id, {
           liveKmMin: livePace.min,
           liveKmSec: livePace.sec,
@@ -311,14 +356,39 @@ export const applyChronoplaceLap = internalMutation({
       if (!skipAdvance) {
         const prevCurrentIdx = team.currentIdx ?? 0
         const prevGroupModeQueue = ((team as any).groupModeQueue || undefined) as GroupModeEntry[] | undefined
-        const nextIdx = computeNextRunnerIdx({
-          order: orderArr,
-          runners: runners as any,
-          currentIdx: prevCurrentIdx,
-          groupModeQueue: prevGroupModeQueue || null,
-        })
-        const nextRunnerLocalId = orderArr[nextIdx]
-        const nextRunnerDoc = runners.find((r: any) => r.id === nextRunnerLocalId)
+        // Mock: next runner comes from schedule (handles night group A→B handoff which
+        // doesn't follow normal order rotation). Fallback to standard nextActiveIdx logic.
+        let nextIdx: number
+        if (isMock && mockRunnerName) {
+          // Heroes Academy schedule: lookup next runner by name (handles night group A→B).
+          const nextRunnerName = getMockRunnerForLap(lapNumber + 1)
+          const mockNextOrderIdx = nextRunnerName
+            ? orderArr.findIndex((rid) => {
+                const r = runners.find((rr: any) => rr.id === rid)
+                return r && r.name === nextRunnerName
+              })
+            : -1
+          nextIdx = mockNextOrderIdx >= 0 ? mockNextOrderIdx : orderArr.length
+        } else if (orderArr.length === 0) {
+          // Pas de coureurs → sentinel (laps suivants restent non-attribués).
+          nextIdx = 0
+        } else {
+          // Linear advance NO wrap: after last runner stint → currentIdx = orderArr.length
+          // (sentinel out-of-bounds) → laps suivants insérés sans runnerId. Si group mode
+          // actif, on respecte la queue (computeNextRunnerIdx peut wrap pour groupes).
+          if (prevGroupModeQueue && prevGroupModeQueue.length > 0) {
+            nextIdx = computeNextRunnerIdx({
+              order: orderArr,
+              runners: runners as any,
+              currentIdx: prevCurrentIdx,
+              groupModeQueue: prevGroupModeQueue || null,
+            })
+          } else {
+            nextIdx = Math.min(prevCurrentIdx + 1, orderArr.length)
+          }
+        }
+        const nextRunnerLocalId = nextIdx < orderArr.length ? orderArr[nextIdx] : ''
+        const nextRunnerDoc = nextRunnerLocalId ? runners.find((r: any) => r.id === nextRunnerLocalId) : undefined
         const newQueue = consumeQueueOnRelay(prevGroupModeQueue, nextRunnerDoc as any)
         await ctx.db.patch(teamId, {
           currentIdx: nextIdx,
@@ -333,6 +403,23 @@ export const applyChronoplaceLap = internalMutation({
       }
     } else {
       await ctx.db.patch(teamId, { updatedAt: createdAtMs } as any)
+    }
+
+    // Mock testMode: pré-calcul (lapTime + chronoplaceId) du tour suivant
+    // → marker frontend anime à la cadence EXACTE et affiche l'id du tour en cours.
+    if (isMock) {
+      const eventNow = await ctx.db.get(team.eventId)
+      const tNow = getEffectiveTimings(eventNow)
+      const peekMeta = getMockLapMeta(
+        (team as any).chronoplaceSlug,
+        lapNumber + 1,
+        (eventNow as any)?.actualStart || 0,
+        tNow.testModeDivider,
+      )
+      await ctx.db.patch(teamId, {
+        nextExpectedLapMs: peekMeta?.lapTimeMs ?? undefined,
+        nextExpectedChronoplaceId: peekMeta?.chronoplaceId ?? undefined,
+      } as any)
     }
 
     return {
@@ -515,74 +602,110 @@ export const scheduleNextAutoBurst = internalMutation({
       .query('runners')
       .withIndex('by_team', (q) => q.eq('teamId', teamId))
       .collect()
-    if (runners.length === 0) return null
+    const noRunners = runners.length === 0
 
     const orderDoc = await ctx.db
       .query('teamOrder')
       .withIndex('by_team', (q) => q.eq('teamId', teamId))
       .first()
-    const orderArr: string[] =
-      orderDoc && orderDoc.order && orderDoc.order.length > 0
-        ? orderDoc.order
-        : runners.map((r: any) => r.id)
-    if (orderArr.length === 0) return null
+    const orderArr: string[] = noRunners
+      ? []
+      : (orderDoc && orderDoc.order && orderDoc.order.length > 0
+          ? orderDoc.order
+          : runners.map((r: any) => r.id))
 
-    const currentRunnerLocalId = orderArr[(team.currentIdx || 0) % orderArr.length]
-    const runner: any = runners.find((r: any) => r.id === currentRunnerLocalId)
-    if (!runner) return null
+    const currentRunnerLocalId = orderArr.length > 0 && (team.currentIdx || 0) < orderArr.length
+      ? orderArr[team.currentIdx || 0]
+      : ''
+    const runner: any = currentRunnerLocalId ? runners.find((r: any) => r.id === currentRunnerLocalId) : null
 
-    // Determine if upcoming lap is a relay.
+    // Determine if upcoming lap is a relay (runner-aware; noRunners → never relay).
     const allTeamLaps = await ctx.db
       .query('laps')
       .withIndex('by_team', (q) => q.eq('teamId', teamId))
       .collect()
     const sortedDesc = [...allTeamLaps].sort((a: any, b: any) => b.timestamp - a.timestamp)
     let lapsThisStint = 0
-    for (const l of sortedDesc) {
-      if (l.type === 'relay_manual' || l.type === 'relay_auto') break
-      if (l.runnerId === currentRunnerLocalId) lapsThisStint++
+    if (runner) {
+      for (const l of sortedDesc) {
+        if (l.type === 'relay_manual' || l.type === 'relay_auto') break
+        if (l.runnerId === currentRunnerLocalId) lapsThisStint++
+      }
     }
-    const planned = runner.plannedLaps ?? 4
-    const upcomingIsRelay = lapsThisStint + 1 >= planned
+    const planned = runner?.plannedLaps ?? 4
+    const upcomingIsRelay = !!runner && lapsThisStint + 1 >= planned
 
     const tDecide = getEffectiveTimings(event)
     const lastLap = sortedDesc[0]
-    // For the very first lap of the race the start line is offset from the GPS loop
-    // start, so the distance can differ. Subsequent laps use `lapDistance`.
     const isFirstEverLap = !lastLap
     const lapDistanceForExpected = isFirstEverLap
       ? ((event as any).firstLapDistanceM ?? (event as any).lapDistance ?? LAP_DISTANCE_M)
       : ((event as any).lapDistance ?? LAP_DISTANCE_M)
 
-    const liveLapMs =
-      runner.liveKmMin != null && runner.liveKmSec != null
-        ? kmPaceToLapMs(runner.liveKmMin, runner.liveKmSec, lapDistanceForExpected)
-        : 0
-    const liveOk = liveLapMs >= MIN_LAP_GAP_MS
-
-    const hasRelayOverride =
-      upcomingIsRelay && runner.theoreticalRelayPaceMin != null && runner.theoreticalRelayPaceSec != null
-    // Pace source: relay-override > live (already test-scaled) > config (needs /divider in test).
-    let kmMin: number
-    let kmSec: number
-    let scaleByDivider: boolean
-    if (hasRelayOverride) {
-      kmMin = runner.theoreticalRelayPaceMin
-      kmSec = runner.theoreticalRelayPaceSec
-      scaleByDivider = false
-    } else if (liveOk) {
-      kmMin = runner.liveKmMin
-      kmSec = runner.liveKmSec
-      scaleByDivider = false
+    // Cascade priorité expectedLapMs (mock = course déjà passée, valeurs API connues):
+    //  0. mock peek direct (testMode + slug mock) — TOUJOURS calculé from raw data
+    //     (pas depuis team.nextExpectedLapMs qui peut être stale ou pas encore patché)
+    //  1. lastLap.lapTime (API value du tour précédent — fallback)
+    //  2. runner théorique relay-override
+    //  3. runner live calibré
+    //  4. runner config kmMin/Sec (scaled by divider en test)
+    //  5. fallback default 6'00/km divisé
+    let expectedLapMs: number
+    const isMockTeamEarly = shouldUseMockChronoplace(
+      (team as any).chronoplaceSlug,
+      (event as any).testMode,
+    )
+    const upcomingLapNumberEarly = (lastLap?.lapNumber || 0) + 1
+    const peekEarly = isMockTeamEarly
+      ? getMockNextLapTimeMs(
+          (team as any).chronoplaceSlug,
+          upcomingLapNumberEarly,
+          tDecide.testModeDivider,
+        )
+      : null
+    if (peekEarly && peekEarly > 0) {
+      const offsetMs = upcomingIsRelay ? tDecide.relayTransitionSec * 1000 : 0
+      expectedLapMs = peekEarly + offsetMs
+    } else if (lastLap && lastLap.lapTime > 0) {
+      // Source 1: API précédente
+      const wasRelay = lastLap.type === 'relay_manual' || lastLap.type === 'relay_auto'
+      const stripped = wasRelay ? Math.max(MIN_LAP_GAP_MS, lastLap.lapTime - tDecide.relayTransitionSec * 1000) : lastLap.lapTime
+      const offsetMs = upcomingIsRelay ? tDecide.relayTransitionSec * 1000 : 0
+      expectedLapMs = stripped + offsetMs
+    } else if (runner) {
+      // Sources 2-4: runner config / live / theoretical
+      const liveLapMs =
+        runner.liveKmMin != null && runner.liveKmSec != null
+          ? kmPaceToLapMs(runner.liveKmMin, runner.liveKmSec, lapDistanceForExpected)
+          : 0
+      const liveOk = liveLapMs >= MIN_LAP_GAP_MS
+      const hasRelayOverride =
+        upcomingIsRelay && runner.theoreticalRelayPaceMin != null && runner.theoreticalRelayPaceSec != null
+      let kmMin: number
+      let kmSec: number
+      let scaleByDivider: boolean
+      if (hasRelayOverride) {
+        kmMin = runner.theoreticalRelayPaceMin
+        kmSec = runner.theoreticalRelayPaceSec
+        scaleByDivider = false
+      } else if (liveOk) {
+        kmMin = runner.liveKmMin
+        kmSec = runner.liveKmSec
+        scaleByDivider = false
+      } else {
+        kmMin = runner.kmMin ?? 6
+        kmSec = runner.kmSec ?? 0
+        scaleByDivider = tDecide.testMode
+      }
+      const paceSec = (kmMin * 60 + kmSec) / (scaleByDivider ? tDecide.testModeDivider : 1)
+      const baseExpectedLapMs = Math.round((paceSec * lapDistanceForExpected) / 1000) * 1000
+      const offsetMs = upcomingIsRelay && !hasRelayOverride ? tDecide.relayTransitionSec * 1000 : 0
+      expectedLapMs = baseExpectedLapMs + offsetMs
     } else {
-      kmMin = runner.kmMin ?? 6
-      kmSec = runner.kmSec ?? 0
-      scaleByDivider = tDecide.testMode
+      // Source 5: fallback default uniquement pour 1er tour d'équipe sans roster
+      const defaultPaceSec = 360 / (tDecide.testMode ? tDecide.testModeDivider : 1)
+      expectedLapMs = Math.round((defaultPaceSec * lapDistanceForExpected) / 1000) * 1000
     }
-    const paceSec = (kmMin * 60 + kmSec) / (scaleByDivider ? tDecide.testModeDivider : 1)
-    const baseExpectedLapMs = Math.round((paceSec * lapDistanceForExpected) / 1000) * 1000
-    const offsetMs = upcomingIsRelay && !hasRelayOverride ? tDecide.relayTransitionSec * 1000 : 0
-    const expectedLapMs = baseExpectedLapMs + offsetMs
 
     const refTs = lastLap ? lastLap.timestamp : (event as any).actualStart
     if (!refTs) return null
@@ -593,6 +716,19 @@ export const scheduleNextAutoBurst = internalMutation({
       (max: number, l: any) => (l.chronoplaceId ? Math.max(max, l.lapNumber || 0) : max),
       0,
     )
+    // Mock testMode: nextExpectedLapMs (peek mock) déjà calculé via peekEarly plus haut.
+    const isMockTeam = isMockTeamEarly
+    const upcomingLapNumber = lastSeenChronoLapNumber + 1
+    const peekUpcoming = peekEarly
+    const peekUpcomingMeta = isMockTeam
+      ? getMockLapMeta(
+          (team as any).chronoplaceSlug,
+          upcomingLapNumber,
+          (event as any).actualStart || 0,
+          tDecide.testModeDivider,
+        )
+      : null
+
     await ctx.db.patch(teamId, {
       pendingPollBurst: {
         type: 'auto' as const,
@@ -603,13 +739,26 @@ export const scheduleNextAutoBurst = internalMutation({
         maxAttempts: maxAttemptsForBurst('auto', tDecide.testModeDivider),
         lastSeenChronoLapNumber,
       },
+      nextExpectedLapMs: peekUpcoming ?? undefined,
+      nextExpectedChronoplaceId: peekUpcomingMeta?.chronoplaceId ?? undefined,
       updatedAt: Date.now(),
     } as any)
     const delay = Math.max(0, fireAt - Date.now())
-    await ctx.scheduler.runAfter(delay, internal.chronoplace.pollBurstStep, {
-      teamId,
-      burstStartedAt: startedAt,
-    })
+    // Mock testMode: bypass poll burst — schedule direct insertion at reveal time.
+    // L'API mock connaît déjà toutes les valeurs → on évite le polling et on insère
+    // pile au moment où le tour est sensé être révélé. Garantit ~0ms de latence.
+    if (isMockTeam && peekUpcoming != null) {
+      await ctx.scheduler.runAfter(delay, internal.chronoplace.directApplyMockLap, {
+        teamId,
+        lapNumber: upcomingLapNumber,
+        burstStartedAt: startedAt,
+      })
+    } else {
+      await ctx.scheduler.runAfter(delay, internal.chronoplace.pollBurstStep, {
+        teamId,
+        burstStartedAt: startedAt,
+      })
+    }
     return { startedAt, fireAt, upcomingIsRelay }
   },
 })
@@ -618,6 +767,54 @@ export const scheduleNextAutoBurst = internalMutation({
 
 // The single recursive step of a burst. Reads current state, decides what to do, and
 // either applies a discovered lap or reschedules itself after POLL_INTERVAL_MS.
+// Direct mock insertion — bypass burst polling for mock testMode teams. Fires once
+// at the predicted reveal time with the exact lap data from the mock dataset.
+// Idempotent via applyChronoplaceLap chronoplaceId guard.
+export const directApplyMockLap = internalAction({
+  args: {
+    teamId: v.id('teams'),
+    lapNumber: v.number(),
+    burstStartedAt: v.number(),
+  },
+  handler: async (ctx, { teamId, lapNumber, burstStartedAt }) => {
+    const sctx: any = await ctx.runQuery(internal.chronoplace.getTeamSyncContext, { teamId })
+    if (!sctx) return { ok: false, reason: 'no_team' }
+    const burst = sctx.pendingPollBurst
+    if (!burst || burst.startedAt !== burstStartedAt) return { ok: false, reason: 'stale' }
+    if (sctx.eventStatus !== 'running' || sctx.actualEnd) {
+      await ctx.runMutation(internal.chronoplace.clearBurst, { teamId, burstStartedAt })
+      return { ok: false, reason: 'event_not_running' }
+    }
+    const meta = getMockLapMeta(
+      sctx.chronoplaceSlug,
+      lapNumber,
+      sctx.actualStart || 0,
+      sctx.testModeDivider || 3,
+    )
+    if (!meta) {
+      await ctx.runMutation(internal.chronoplace.clearBurst, { teamId, burstStartedAt })
+      return { ok: false, reason: 'no_more_laps' }
+    }
+    await ctx.runMutation(internal.chronoplace.applyChronoplaceLap, {
+      teamId,
+      chronoplaceId: meta.chronoplaceId,
+      lapNumber,
+      lapTimeMs: meta.lapTimeMs,
+      createdAtMs: meta.revealAtMs,
+      rang: meta.rang,
+      manualTag:
+        burst.type === 'manual'
+          ? { kind: burst.kind, runnerId: burst.runnerId }
+          : undefined,
+    })
+    await ctx.runMutation(internal.chronoplace.markSyncResult, { teamId, error: undefined })
+    await ctx.runMutation(internal.chronoplace.clearBurst, { teamId, burstStartedAt })
+    await ctx.runMutation(internal.chronoplace.clearAutoPaused, { teamId })
+    await ctx.runMutation(internal.chronoplace.scheduleNextAutoBurst, { teamId })
+    return { ok: true, lapNumber }
+  },
+})
+
 export const pollBurstStep = internalAction({
   args: { teamId: v.id('teams'), burstStartedAt: v.number() },
   handler: async (ctx, { teamId, burstStartedAt }) => {
@@ -699,6 +896,7 @@ export const pollBurstStep = internalAction({
       lapNumber: newLap.nb_tours,
       lapTimeMs,
       createdAtMs,
+      rang: typeof (newLap as any).rang === 'number' ? (newLap as any).rang : undefined,
       manualTag:
         burst.type === 'manual'
           ? { kind: burst.kind, runnerId: burst.runnerId }
@@ -757,6 +955,7 @@ export const syncTeam = internalAction({
         lapNumber: lap.nb_tours,
         lapTimeMs,
         createdAtMs,
+        rang: typeof (lap as any).rang === 'number' ? (lap as any).rang : undefined,
       })
       if (result.kind === 'insert') inserted++
       else if (result.kind === 'overwrite') overwritten++

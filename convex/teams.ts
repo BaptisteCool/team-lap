@@ -132,6 +132,40 @@ export const setChronoplaceSlug = mutation({
   },
 })
 
+// Set or clear the team bib number (dossard). String to preserve leading zeros.
+// Rejects update if race has started (status !== 'scheduled').
+export const setDossard = mutation({
+  args: { teamId: v.id('teams'), dossard: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const team = await ctx.db.get(args.teamId)
+    if (!team) throw new ConvexError({ code: 'NO_TEAM', message: 'Équipe introuvable' })
+    const event = await ctx.db.get(team.eventId)
+    if (event && (event as any).status !== 'scheduled') {
+      throw new ConvexError({
+        code: 'RACE_STARTED',
+        message: 'Course démarrée — dossard non modifiable.',
+      })
+    }
+    const cleaned = (args.dossard ?? '').trim()
+    await ctx.db.patch(args.teamId, {
+      dossard: cleaned.length > 0 ? cleaned : undefined,
+      updatedAt: Date.now(),
+    } as any)
+  },
+})
+
+// Set or clear the public URL to the team-specific Chronoplace results page.
+export const setChronoplaceResultsUrl = mutation({
+  args: { teamId: v.id('teams'), url: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const cleaned = (args.url ?? '').trim()
+    await ctx.db.patch(args.teamId, {
+      chronoplaceResultsUrl: cleaned.length > 0 ? cleaned : undefined,
+      updatedAt: Date.now(),
+    } as any)
+  },
+})
+
 // Toggle Chronoplace sync for a team. When enabled, manual clicks arm a burst-poll
 // of the Chronoplace API and the team's auto-pass chain takes over from server crons.
 export const setChronoSyncEnabled = mutation({

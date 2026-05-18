@@ -45,9 +45,12 @@ function AdminPage() {
   const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
   const setLatLngMutation = useMutation('events:setLatLng' as any)
   const setRelayTransitionSecMutation = useMutation('events:setRelayTransitionSec' as any)
-  const setLateGraceSecMutation = useMutation('events:setLateGraceSec' as any)
   const setChronoplaceEventIdMutation = useMutation('events:setChronoplaceEventId' as any)
+  const setChronoplaceClassementUrlMutation = useMutation('events:setChronoplaceClassementUrl' as any)
+  const setOrganizerUrlMutation = useMutation('events:setOrganizerUrl' as any)
   const setChronoplaceSlugMutation = useMutation('teams:setChronoplaceSlug' as any)
+  const setChronoplaceResultsUrlMutation = useMutation('teams:setChronoplaceResultsUrl' as any)
+  const setDossardMutation = useMutation('teams:setDossard' as any)
   const setChronoSyncEnabledMutation = useMutation('teams:setChronoSyncEnabled' as any)
   const forceChronoSyncAction = useAction('chronoplace:forceSyncTeam' as any)
   const dispatchChronoSyncAction = useAction('chronoplace:dispatchSync' as any)
@@ -251,9 +254,11 @@ function AdminPage() {
             contactName: team.contactName,
             contactPhone: team.contactPhone,
             chronoplaceSlug: team.chronoplaceSlug,
+            chronoplaceResultsUrl: team.chronoplaceResultsUrl,
             chronoSyncEnabled: team.chronoSyncEnabled,
             lastChronoSyncAt: team.lastChronoSyncAt,
             chronoSyncError: team.chronoSyncError,
+            dossard: team.dossard,
           },
           runners: [],
           order: [],
@@ -462,18 +467,29 @@ function AdminPage() {
           if (!event?._id) throw new Error('Événement non chargé')
           await setRelayTransitionSecMutation({ eventId: event._id, seconds })
         }}
-        lateGraceSec={(event as any)?.lateGraceSec ?? 45}
-        onSetLateGraceSec={async (seconds: number) => {
-          if (!event?._id) throw new Error('Événement non chargé')
-          await setLateGraceSecMutation({ eventId: event._id, seconds })
-        }}
         chronoplaceEventId={(event as any)?.chronoplaceEventId}
         onSetChronoplaceEventId={async (value: number | undefined) => {
           if (!event?._id) throw new Error('Événement non chargé')
           await setChronoplaceEventIdMutation({ eventId: event._id, chronoplaceEventId: value })
         }}
+        chronoplaceClassementUrl={(event as any)?.chronoplaceClassementUrl}
+        onSetChronoplaceClassementUrl={async (url: string | undefined) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setChronoplaceClassementUrlMutation({ eventId: event._id, url })
+        }}
+        organizerUrl={(event as any)?.organizerUrl}
+        onSetOrganizerUrl={async (url: string | undefined) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setOrganizerUrlMutation({ eventId: event._id, url })
+        }}
         onSetChronoplaceSlug={async (teamId: string, slug: string | undefined) => {
           await setChronoplaceSlugMutation({ teamId, slug })
+        }}
+        onSetChronoplaceResultsUrl={async (teamId: string, url: string | undefined) => {
+          await setChronoplaceResultsUrlMutation({ teamId, url })
+        }}
+        onSetDossard={async (teamId: string, dossard: string | undefined) => {
+          await setDossardMutation({ teamId, dossard })
         }}
         onSetChronoSyncEnabled={async (teamId: string, enabled: boolean) => {
           await setChronoSyncEnabledMutation({ teamId, enabled })
@@ -486,7 +502,7 @@ function AdminPage() {
             return { ok: false, error: e?.message || 'error' }
           }
         }}
-        testMode={(event as any)?.testMode ?? false}
+        testMode={(event as any)?.testMode ?? true}
         onSetTestMode={async (value: boolean) => {
           if (!event?._id) throw new Error('Événement non chargé')
           await setTestModeMutation({ eventId: event._id, value })
@@ -495,15 +511,12 @@ function AdminPage() {
           const ev = event as any
           if (!ev) return false
           if (ev.status !== 'scheduled') return true
-          if (ev.scheduledStart && ev.scheduledStart - Date.now() < 10 * 60 * 1000) return true
           return false
         })()}
         testModeLockReason={(() => {
           const ev = event as any
           if (!ev) return undefined
           if (ev.status !== 'scheduled') return 'Course démarrée ou terminée'
-          if (ev.scheduledStart && ev.scheduledStart - Date.now() < 10 * 60 * 1000)
-            return 'Départ dans moins de 10 min'
           return undefined
         })()}
         actualEnd={(event as any)?.actualEnd ?? null}

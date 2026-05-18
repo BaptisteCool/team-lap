@@ -22,8 +22,8 @@ export const createDemoEvent = mutation({
       organizationId: args.organizationId,
       name: '24h de Brette-les-Pins 2026',
       slug: '24h-brette-les-pins-2026',
-      scheduledStart: new Date('2026-05-16T15:00:00.000Z').getTime(),
-      scheduledEnd: new Date('2026-05-17T15:00:00.000Z').getTime(),
+      scheduledStart: new Date('2026-05-16T14:00:00+02:00').getTime(),
+      scheduledEnd: new Date('2026-05-17T14:00:00+02:00').getTime(),
       status: 'scheduled',
       lapDistance: 900,
       raceDuration: 24 * 3600 * 1000,
@@ -201,9 +201,11 @@ export const resetSeed = mutation({
 
 // All-in-one seed (idempotent: skips if event slug already exists).
 // Seeds the Heroes Academy team mirrored on the real Chronoplace race (eventId 225):
-// 5 runners in relay order — Sim(6) → Martial(5) → Charlotte(4) → Baco(6) → Marina(4)
-// = 25 laps per rotation, matching the recorded mock data 1:1.
-// Event is configured in testMode so the mock Chronoplace API serves laps compressed /4.
+// 9 runners in relay order — Simon(6) → Martial(5) → Charlotte(4) → Baptiste(6) →
+// Marina(4) → Marc(5) → Théo(6) → Lucie(4) → Pascal(6) = 46 laps per rotation.
+// Pace prédiction (kmMin/Sec) + 1er relai observé (theoreticalRelayPaceMin/Sec)
+// fournis depuis le tableau papier de l'équipe.
+// Event is configured in testMode so the mock Chronoplace API serves laps compressed.
 export const seedAll = mutation({
   args: {},
   handler: async (ctx) => {
@@ -227,8 +229,8 @@ export const seedAll = mutation({
       organizationId: orgId,
       name: '24h Running 2026 (mock)',
       slug,
-      scheduledStart: new Date('2026-05-16T15:00:00.000Z').getTime(),
-      scheduledEnd: new Date('2026-05-17T15:00:00.000Z').getTime(),
+      scheduledStart: new Date('2026-05-16T14:00:00+02:00').getTime(),
+      scheduledEnd: new Date('2026-05-17T14:00:00+02:00').getTime(),
       status: 'scheduled',
       lapDistance: 900,
       raceDuration: 24 * 3600 * 1000,
@@ -238,22 +240,52 @@ export const seedAll = mutation({
       testMode: true,
       relayTransitionSec: 5,
       lateGraceSec: 45,
+      cityName: 'Brette-les-Pins',
+      latitude: 47.9133,
+      longitude: 0.33765,
+      firstLapDistanceM: 800,
+      chronoplaceClassementUrl: 'https://www.chronoplace.fr/classement/24h-running-2026/epreuve/552',
+      organizerUrl: 'https://fr.milesrepublic.com/event/24h-running-15149',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     })
 
+    // Order + pace prédiction (col "Prédiction temps" papier) +
+    // 1er relai observé dérivé directement du mock Chronoplace (MOCK_HEROES_ACADEMY_LAPS)
+    // = source de vérité. Formule: sum(indices) / (nbLaps * 0.9km).
+    // Rotation 1 (53 tours) = Simon[0..5](6) Martial[6..10](5) Charlotte[11..14](4)
+    // Baptiste[15..20](6) Marina[21..24](4) Marc[25..29](5) Théo[30..35](6)
+    // Lucie[36..39](4) Pascal[40..52](13).
+    // Pascal remplace un coureur absent → plannedLaps = 2×6 = 12 (théorique).
+    // Rotation 1 observée a 13 tours (1 de plus que théorique), rotation 2 = 12 (théorique).
     const runnersTemplate: Array<{
       name: string
       kmMin: number
       kmSec: number
       plannedLaps: number
       color: string
+      theoreticalRelayPaceMin?: number
+      theoreticalRelayPaceSec?: number
     }> = [
-      { name: 'Sim',       kmMin: 4, kmSec: 30, plannedLaps: 6, color: '#A6F060' },
-      { name: 'Martial',   kmMin: 4, kmSec: 30, plannedLaps: 5, color: '#60D9F0' },
-      { name: 'Charlotte', kmMin: 6, kmSec: 0,  plannedLaps: 4, color: '#F06080' },
-      { name: 'Baco',      kmMin: 6, kmSec: 30, plannedLaps: 6, color: '#F0A860' },
-      { name: 'Marina',    kmMin: 6, kmSec: 45, plannedLaps: 4, color: '#D060F0' },
+      // Simon — pace 5'00, 6 tours, 1er relai 1510s → 4'40/km
+      { name: 'Simon',     kmMin: 5, kmSec: 0,  plannedLaps: 6, color: '#A6F060', theoreticalRelayPaceMin: 4, theoreticalRelayPaceSec: 40 },
+      // Martial — pace 5'30, 5 tours, 1er relai 1315s → 4'52/km
+      { name: 'Martial',   kmMin: 5, kmSec: 30, plannedLaps: 5, color: '#60D9F0', theoreticalRelayPaceMin: 4, theoreticalRelayPaceSec: 52 },
+      // Charlotte — pace 6'15, 4 tours, 1er relai 1357s → 6'17/km
+      { name: 'Charlotte', kmMin: 6, kmSec: 15, plannedLaps: 4, color: '#F06080', theoreticalRelayPaceMin: 6, theoreticalRelayPaceSec: 17 },
+      // Baptiste — pace 4'45, 6 tours, 1er relai 1487s → 4'35/km
+      { name: 'Baptiste',  kmMin: 4, kmSec: 45, plannedLaps: 6, color: '#F0A860', theoreticalRelayPaceMin: 4, theoreticalRelayPaceSec: 35 },
+      // Marina — pace 6'45, 4 tours, 1er relai 1386s → 6'25/km
+      { name: 'Marina',    kmMin: 6, kmSec: 45, plannedLaps: 4, color: '#D060F0', theoreticalRelayPaceMin: 6, theoreticalRelayPaceSec: 25 },
+      // Marc — pace 5'30, 5 tours, 1er relai 1509s → 5'35/km
+      { name: 'Marc',      kmMin: 5, kmSec: 30, plannedLaps: 5, color: '#F0E060', theoreticalRelayPaceMin: 5, theoreticalRelayPaceSec: 35 },
+      // Théo — pace 5'00, 6 tours, 1er relai 1651s → 5'06/km
+      { name: 'Théo',      kmMin: 5, kmSec: 0,  plannedLaps: 6, color: '#60F0C0', theoreticalRelayPaceMin: 5, theoreticalRelayPaceSec: 6 },
+      // Lucie — pace 6'00, 4 tours, 1er relai 1219s → 5'39/km
+      { name: 'Lucie',     kmMin: 6, kmSec: 0,  plannedLaps: 4, color: '#F060C0', theoreticalRelayPaceMin: 5, theoreticalRelayPaceSec: 39 },
+      // Pascal — pace 4'20, 12 tours (remplace un absent, 2×6 théorique),
+      // 1er relai observé 13 tours en 2993s → 4'16/km
+      { name: 'Pascal',    kmMin: 4, kmSec: 20, plannedLaps: 12, color: '#6080F0', theoreticalRelayPaceMin: 4, theoreticalRelayPaceSec: 16 },
     ]
 
     const teamId = await ctx.db.insert('teams', {
@@ -261,12 +293,14 @@ export const seedAll = mutation({
       name: 'Heroes Academy',
       category: 'Mixte',
       color: '#60D9F0',
-      maxRunners: 5,
+      maxRunners: 9,
       goalLaps: 300,
       pin: '0000',
       ready: true,
       currentIdx: 0,
       chronoplaceSlug: 'heroes-academy',
+      dossard: '8',
+      chronoplaceResultsUrl: 'https://www.chronoplace.fr/classement/24h-running-2026/epreuve/552/equipe/heroes-academy',
       chronoSyncEnabled: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -276,7 +310,7 @@ export const seedAll = mutation({
     const now = Date.now()
     for (let i = 0; i < runnersTemplate.length; i++) {
       const r = runnersTemplate[i]
-      const localId = `r${now}_${i}_${r.name.toLowerCase()}`
+      const localId = `r${now}_${i}_${r.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')}`
       await ctx.db.insert('runners', {
         teamId,
         name: r.name,
@@ -287,6 +321,8 @@ export const seedAll = mutation({
         plannedLaps: r.plannedLaps,
         color: r.color,
         status: 'ready',
+        theoreticalRelayPaceMin: r.theoreticalRelayPaceMin,
+        theoreticalRelayPaceSec: r.theoreticalRelayPaceSec,
         createdAt: now,
       })
       localRunnerIds.push(localId)
@@ -297,11 +333,73 @@ export const seedAll = mutation({
       order: localRunnerIds,
     })
 
+    // ── Other mock teams (Chronoplace data dispo via mockChronoplace.ts) ──
+    // Aucun runner configuré → on ne connaît pas le coureur en piste, pas de planning,
+    // pas d'attribution par stint. Le marker map affiche seulement nom équipe + allure
+    // brute du dernier lap Chronoplace.
+    type GenericTeam = {
+      name: string
+      color: string
+      pin: string
+      dossard: string
+      chronoplaceSlug: string
+      chronoplaceResultsUrl: string
+    }
+    const otherTeams: GenericTeam[] = [
+      {
+        name: "Les Licornes ça n'existe pas",
+        color: '#F060A0',
+        pin: '0001',
+        dossard: '26',
+        chronoplaceSlug: "les-licornes-ca-n'existe-pas",
+        chronoplaceResultsUrl: "https://www.chronoplace.fr/classement/24h-running-2026/epreuve/552/equipe/les-licornes-ca-n'existe-pas",
+      },
+      {
+        name: 'F2tards Endurants',
+        color: '#F0C040',
+        pin: '0002',
+        dossard: '7',
+        chronoplaceSlug: 'f2tards-endurants',
+        chronoplaceResultsUrl: 'https://www.chronoplace.fr/classement/24h-running-2026/epreuve/552/equipe/f2tards-endurants',
+      },
+      {
+        name: 'Aiglehoux et compagnie',
+        color: '#80C0F0',
+        pin: '0003',
+        dossard: '5',
+        chronoplaceSlug: 'aiglehoux-et-compagnie',
+        chronoplaceResultsUrl: 'https://www.chronoplace.fr/classement/24h-running-2026/epreuve/552/equipe/aiglehoux-et-compagnie',
+      },
+    ]
+
+    const otherTeamIds: any[] = []
+    for (const ot of otherTeams) {
+      const otId = await ctx.db.insert('teams', {
+        eventId,
+        name: ot.name,
+        category: 'Mixte',
+        color: ot.color,
+        maxRunners: 0,
+        goalLaps: 280,
+        pin: ot.pin,
+        ready: true,
+        currentIdx: 0,
+        chronoplaceSlug: ot.chronoplaceSlug,
+        dossard: ot.dossard,
+        chronoplaceResultsUrl: ot.chronoplaceResultsUrl,
+        chronoSyncEnabled: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      // Pas de runners, pas de teamOrder.
+      otherTeamIds.push(otId)
+    }
+
     return {
       skipped: false,
       orgId,
       eventId,
-      teamIds: [teamId],
+      teamIds: [teamId, ...otherTeamIds],
       totalRunners: runnersTemplate.length,
     }
   },

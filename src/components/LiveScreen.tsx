@@ -84,6 +84,8 @@ interface LiveScreenProps {
     chronoplaceSlug?: string
     lastChronoSyncAt?: number
     chronoSyncError?: string
+    nextExpectedChronoplaceId?: number
+    nextExpectedLapMs?: number
   }
   setTeamReady?: (ready: boolean) => void
   onRecordLap?: (change: boolean, runnerId: string) => Promise<{ docId?: any; lapId?: string } | unknown> | void
@@ -379,7 +381,10 @@ export function LiveScreen({
   // or any time when slide-to-unlock is active.
   const EARLY_CLICK_WINDOW_MS = 45_000
   const inWindow = race.started && expectedLapMs > 0 && effCurrentLapMs >= expectedLapMs - EARLY_CLICK_WINDOW_MS
-  const canClick = race.started && (inWindow || forceUnlock || withinAutoReplace)
+  // Mock testMode lock: si le tour en cours est connu via API (mock pré-baked), les
+  // boutons sont désactivés — l'insertion auto via burst direct s'occupe de tout.
+  const mockLapKnown = typeof team?.nextExpectedChronoplaceId === 'number'
+  const canClick = race.started && (inWindow || forceUnlock || withinAutoReplace) && !mockLapKnown
   const remainingToPassage = expectedLapMs > 0 ? expectedLapMs - effCurrentLapMs : 0
   const plannedLaps = Math.max(1, currentRunner?.plannedLaps || 1)
   const lapsRemainingInRelay = Math.max(0, plannedLaps - relayStats.lapsThisRelay)
@@ -802,6 +807,22 @@ export function LiveScreen({
                 </button>
               ) : (
                 <>
+                  {mockLapKnown && (
+                    <div
+                      style={{
+                        gridColumn: '1 / -1',
+                        padding: '10px 14px',
+                        borderRadius: 8,
+                        background: 'oklch(0.72 0.18 200 / 0.12)',
+                        color: 'oklch(0.88 0.14 200)',
+                        border: '1px solid oklch(0.72 0.18 200 / 0.5)',
+                        fontSize: 13,
+                        textAlign: 'center',
+                      }}
+                    >
+                      🧪 Mode test — tour en cours connu via API Chronoplace (#{team?.nextExpectedChronoplaceId}). Insertion automatique, boutons désactivés.
+                    </div>
+                  )}
                   <button
                     className={`big-btn top ${lapsRemainingInRelay === 0 ? 'is-relay-imminent' : ''}`}
                     disabled={!canClick}
@@ -827,72 +848,44 @@ export function LiveScreen({
                           : `Tour validé · ${currentRunner?.name}. Calibre à la seconde près.`}
                     </span>
                   </button>
-                  {scheduledEnd && Date.now() > scheduledEnd ? (
-                    <button
-                      className="big-btn relay"
-                      style={{
-                        background: 'oklch(0.72 0.21 25 / 0.18)',
-                        borderColor: 'oklch(0.72 0.21 25 / 0.5)',
-                        color: 'oklch(0.85 0.18 25)',
-                      }}
-                      onClick={async () => {
-                        if (!onRecordTeamFinish) return
-                        if (!window.confirm("Fin de course pour cette équipe ?\n\nLe coureur en piste a passé la ligne après l'heure de fin. Action irréversible.")) return
-                        try {
-                          await onRecordTeamFinish()
-                          pushToast?.('🏁 Équipe terminée', 'Flag')
-                        } catch (err: any) {
-                          const msg = err?.data?.message || err?.message || 'Erreur'
-                          pushToast?.(msg, 'AlertTriangle')
-                        }
-                      }}
-                    >
-                      <span className="label-top">🏁 Fin de course</span>
-                      <span className="label-main mono">Arrêter cette équipe</span>
-                      <span className="label-sub">
-                        Le coureur a passé la ligne après l'heure de fin. Click pour valider.
-                      </span>
-                    </button>
-                  ) : (
-                    <button
-                      className={`big-btn relay ${lapsRemainingInRelay > 0 && race.started ? 'is-warn' : ''}`}
-                      disabled={!canClick}
-                      onClick={() => recordLap(true)}
-                    >
-                      <span className="label-top">
-                        Relai → {nextRunner?.name || '—'}
-                        {nextRunner?.status === 'uncertain' && (
-                          <span
-                            className="badge"
-                            style={{
-                              marginLeft: 6,
-                              fontSize: 10,
-                              background: 'oklch(0.82 0.17 70 / 0.20)',
-                              color: 'oklch(0.92 0.17 70)',
-                              border: '1px solid oklch(0.82 0.17 70 / 0.55)',
-                              padding: '1px 5px',
-                              borderRadius: 4,
-                            }}
-                            title="Coureur incertain"
-                          >
-                            ? Incertain
-                          </span>
+                  <button
+                    className={`big-btn relay ${lapsRemainingInRelay > 0 && race.started ? 'is-warn' : ''}`}
+                    disabled={!canClick}
+                    onClick={() => recordLap(true)}
+                  >
+                    <span className="label-top">
+                      Relai → {nextRunner?.name || '—'}
+                      {nextRunner?.status === 'uncertain' && (
+                        <span
+                          className="badge"
+                          style={{
+                            marginLeft: 6,
+                            fontSize: 10,
+                            background: 'oklch(0.82 0.17 70 / 0.20)',
+                            color: 'oklch(0.92 0.17 70)',
+                            border: '1px solid oklch(0.82 0.17 70 / 0.55)',
+                            padding: '1px 5px',
+                            borderRadius: 4,
+                          }}
+                          title="Coureur incertain"
+                        >
+                          ? Incertain
+                        </span>
+                      )}
+                    </span>
+                    <span className="label-main mono">
+                      {!race.started ? '—' : team?.autoPaused ? '⏸ PAUSE' : etaRelay > 0 ? `Estim. ${fmtLap(etaRelay)}` : 'maintenant'}
+                    </span>
+                    <span className="label-sub">
+                      {!race.started
+                        ? 'En attente du top départ'
+                        : (
+                          <>
+                            Reste <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{fractionalRemaining.toFixed(1).replace('.', ',')}</span> tour{fractionalRemaining >= 2 ? 's' : ''} pour {currentRunner?.name}.
+                          </>
                         )}
-                      </span>
-                      <span className="label-main mono">
-                        {!race.started ? '—' : team?.autoPaused ? '⏸ PAUSE' : etaRelay > 0 ? `Estim. ${fmtLap(etaRelay)}` : 'maintenant'}
-                      </span>
-                      <span className="label-sub">
-                        {!race.started
-                          ? 'En attente du top départ'
-                          : (
-                            <>
-                              Reste <span className="mono" style={{ color: 'var(--accent)', fontWeight: 600 }}>{fractionalRemaining.toFixed(1).replace('.', ',')}</span> tour{fractionalRemaining >= 2 ? 's' : ''} pour {currentRunner?.name}.
-                            </>
-                          )}
-                      </span>
-                    </button>
-                  )}
+                    </span>
+                  </button>
                 </>
               )}
             </div>

@@ -30,9 +30,11 @@ interface TeamInfo {
   contactPhone?: string
   // Chronoplace sync (read-only in this UI — mutations go through dedicated callbacks)
   chronoplaceSlug?: string
+  chronoplaceResultsUrl?: string
   chronoSyncEnabled?: boolean
   lastChronoSyncAt?: number
   chronoSyncError?: string
+  dossard?: string
 }
 
 interface Team {
@@ -68,14 +70,19 @@ interface AdminScreenProps {
   relayTransitionSec?: number
   onSetRelayTransitionSec?: (seconds: number) => Promise<void> | void
   // Late-grace window before cron auto-closes a lap (seconds). Default 45. Range 0-300.
-  lateGraceSec?: number
-  onSetLateGraceSec?: (seconds: number) => Promise<void> | void
   // Chronoplace event id (number, e.g. 225). Optional — enables per-team sync when set + slug filled.
   chronoplaceEventId?: number
   onSetChronoplaceEventId?: (value: number | undefined) => Promise<void> | void
+  // Public URLs (event-level)
+  chronoplaceClassementUrl?: string
+  onSetChronoplaceClassementUrl?: (url: string | undefined) => Promise<void> | void
+  organizerUrl?: string
+  onSetOrganizerUrl?: (url: string | undefined) => Promise<void> | void
   // Per-team Chronoplace config callbacks (slug + toggle). Keyed by teamId.
   onSetChronoplaceSlug?: (teamId: string, slug: string | undefined) => Promise<void> | void
+  onSetChronoplaceResultsUrl?: (teamId: string, url: string | undefined) => Promise<void> | void
   onSetChronoSyncEnabled?: (teamId: string, enabled: boolean) => Promise<void> | void
+  onSetDossard?: (teamId: string, dossard: string | undefined) => Promise<void> | void
   // Force-trigger a Chronoplace sync NOW (bypass the 30s cron). Returns { ok, inserted, overwritten, skipped } or null.
   onForceChronoSync?: (teamId: string) => Promise<{ ok: boolean; inserted?: number; overwritten?: number; skipped?: number; error?: string } | null>
 
@@ -111,12 +118,16 @@ export function AdminScreen({
   onSetLatLng,
   relayTransitionSec,
   onSetRelayTransitionSec,
-  lateGraceSec,
-  onSetLateGraceSec,
   chronoplaceEventId,
   onSetChronoplaceEventId,
+  chronoplaceClassementUrl,
+  onSetChronoplaceClassementUrl,
+  organizerUrl,
+  onSetOrganizerUrl,
   onSetChronoplaceSlug,
+  onSetChronoplaceResultsUrl,
   onSetChronoSyncEnabled,
+  onSetDossard,
   onForceChronoSync,
   testMode,
   onSetTestMode,
@@ -126,7 +137,6 @@ export function AdminScreen({
   onEndRace,
 }: AdminScreenProps) {
   const evRelayTransition = relayTransitionSec ?? 5
-  const evLateGrace = lateGraceSec ?? 45
   const evChronoplaceEventId = chronoplaceEventId ?? ''
   const navigate = useNavigate()
   const evMaxRunners = maxRunnersPerTeam ?? 10
@@ -230,7 +240,7 @@ export function AdminScreen({
 
   return (
     <div className="page admin-page">
-      <TestModeBadge testMode={testMode} />
+      <TestModeBadge testMode={testMode} testModeDivider={(admin as any)?.testModeDivider} />
       <div className="grid admin-main-grid" style={{ gridTemplateColumns: '1.2fr 1fr', gap: 18 }}>
         {/* LEFT — Schedule + control + interruptions */}
         <div className="grid" style={{ gap: 18, alignContent: 'start' }}>
@@ -617,46 +627,13 @@ export function AdminScreen({
             </div>
           </div>
 
-          {/* Replace auto window — acceptance time for manual click overriding auto lap */}
+          {/* First lap distance — distance estimation when start line is offset from GPS loop */}
           <div className="card">
             <div className="card-head">
-              <span>⏱️</span>
-              <h3>Fenêtre d'acceptation manuelle</h3>
+              <span>📏</span>
+              <h3>Premier tour</h3>
             </div>
             <div className="card-body grid" style={{ gap: 10 }}>
-              <div className="hint">
-                Délai (en secondes) pendant lequel un click sur Passage / Relai côté équipe REMPLACE l'éventuel passage auto enregistré juste avant.
-                <br />Recommandé : <strong className="mono">10s</strong> en test, <strong className="mono">180s</strong> en course.
-              </div>
-              <div className="field" style={{ maxWidth: 220 }}>
-                <span className="field-label">Délai (secondes)</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="600"
-                  className="mono"
-                  value={(admin as any).replaceAutoWindowSec ?? 180}
-                  onChange={e => setAdmin((a: any) => ({ ...a, replaceAutoWindowSec: Math.max(0, +e.target.value || 0) }))}
-                  style={{ textAlign: 'center' }}
-                />
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  className="btn"
-                  onClick={() => setAdmin((a: any) => ({ ...a, replaceAutoWindowSec: 10 }))}
-                  title="Préréglage tests"
-                >
-                  10s · tests
-                </button>
-                <button
-                  className="btn"
-                  onClick={() => setAdmin((a: any) => ({ ...a, replaceAutoWindowSec: 180 }))}
-                  title="Préréglage course"
-                >
-                  180s · course
-                </button>
-              </div>
-              <hr className="sep" style={{ margin: '4px 0' }} />
               <div className="hint">
                 Distance du premier tour (mètres). Permet d'estimer le temps avant le premier passage
                 quand la ligne de départ est décalée par rapport à la boucle GPS.
@@ -744,30 +721,6 @@ export function AdminScreen({
                   />
                 </div>
                 <div className="field" style={{ maxWidth: 240 }}>
-                  <span className="field-label">Grâce retard (sec)</span>
-                  <input
-                    type="number"
-                    min="0"
-                    max="300"
-                    className="mono"
-                    defaultValue={evLateGrace}
-                    title="Délai laissé à l'équipe pour saisir un retard manuel avant que le cron ne ferme automatiquement le tour (0 = pas de grâce)"
-                    onBlur={async (e) => {
-                      const v = Math.max(0, Math.min(300, Math.round(+e.target.value || 0)))
-                      if (v === evLateGrace) return
-                      try {
-                        await onSetLateGraceSec?.(v)
-                        pushToast(`Grâce retard → ${v}s`, 'Check')
-                      } catch (err: any) {
-                        const msg = err?.data?.message || err?.message || 'Erreur'
-                        pushToast(msg, 'AlertTriangle')
-                        e.target.value = String(evLateGrace)
-                      }
-                    }}
-                    style={{ textAlign: 'center' }}
-                  />
-                </div>
-                <div className="field" style={{ maxWidth: 240 }}>
                   <span className="field-label">Chronoplace event id</span>
                   <input
                     type="number"
@@ -795,7 +748,75 @@ export function AdminScreen({
               </div>
               <hr className="sep" style={{ margin: '4px 0' }} />
               <div className="hint">
-                Mode test : active des timings raccourcis (5s minLap, 30s maxLap, 3s replaceAuto, 2s relayTransition) pour tester la logique cron auto-pass + relai en quelques secondes. Verrouillé une fois la course démarrée ou à moins de 10 min du départ.
+                Liens publics à partager (visiteurs / supporters). Optionnels.
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+                <div className="field" style={{ flex: '1 1 320px' }}>
+                  <span className="field-label">URL classement Chronoplace</span>
+                  <input
+                    type="url"
+                    defaultValue={chronoplaceClassementUrl ?? ''}
+                    placeholder="https://www.chronoplace.fr/classement/..."
+                    onBlur={async (e) => {
+                      const raw = e.target.value.trim()
+                      if (raw === (chronoplaceClassementUrl ?? '')) return
+                      try {
+                        await onSetChronoplaceClassementUrl?.(raw || undefined)
+                        pushToast(raw ? 'URL classement enregistrée' : 'URL classement effacée', 'Check')
+                      } catch (err: any) {
+                        pushToast(err?.data?.message || err?.message || 'Erreur', 'AlertTriangle')
+                        e.target.value = chronoplaceClassementUrl ?? ''
+                      }
+                    }}
+                  />
+                </div>
+                {chronoplaceClassementUrl && (
+                  <a
+                    className="btn ghost"
+                    href={chronoplaceClassementUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ fontSize: 12, padding: '6px 10px', textDecoration: 'none' }}
+                  >
+                    🔗 Ouvrir
+                  </a>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+                <div className="field" style={{ flex: '1 1 320px' }}>
+                  <span className="field-label">URL organisateur</span>
+                  <input
+                    type="url"
+                    defaultValue={organizerUrl ?? ''}
+                    placeholder="https://fr.milesrepublic.com/event/..."
+                    onBlur={async (e) => {
+                      const raw = e.target.value.trim()
+                      if (raw === (organizerUrl ?? '')) return
+                      try {
+                        await onSetOrganizerUrl?.(raw || undefined)
+                        pushToast(raw ? 'URL organisateur enregistrée' : 'URL organisateur effacée', 'Check')
+                      } catch (err: any) {
+                        pushToast(err?.data?.message || err?.message || 'Erreur', 'AlertTriangle')
+                        e.target.value = organizerUrl ?? ''
+                      }
+                    }}
+                  />
+                </div>
+                {organizerUrl && (
+                  <a
+                    className="btn ghost"
+                    href={organizerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ fontSize: 12, padding: '6px 10px', textDecoration: 'none' }}
+                  >
+                    🔗 Ouvrir
+                  </a>
+                )}
+              </div>
+              <hr className="sep" style={{ margin: '4px 0' }} />
+              <div className="hint">
+                Mode test : active des timings raccourcis (5s minLap, 30s maxLap, 3s replaceAuto, 2s relayTransition) pour tester la logique cron auto-pass + relai en quelques secondes. Verrouillé une fois la course démarrée.
               </div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 <label
@@ -1151,6 +1172,33 @@ export function AdminScreen({
                         placeholder="0000"
                       />
                     </div>
+                    <div className="field">
+                      <span className="field-label">
+                        Dossard {race.started && <span className="hint">(verrouillé course démarrée)</span>}
+                      </span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        className="mono"
+                        defaultValue={t.info.dossard || ''}
+                        disabled={race.started}
+                        placeholder="ex: 8"
+                        style={{ textAlign: 'center' }}
+                        onBlur={async (e) => {
+                          const raw = e.target.value.trim()
+                          const next = raw.length > 0 ? raw : undefined
+                          if (next === (t.info.dossard || undefined)) return
+                          try {
+                            await onSetDossard?.(t.info.id, next)
+                            pushToast(next ? `Dossard → ${next}` : 'Dossard effacé', 'Check')
+                          } catch (err: any) {
+                            pushToast(err?.data?.message || err?.message || 'Erreur', 'AlertTriangle')
+                            e.target.value = t.info.dossard || ''
+                          }
+                        }}
+                      />
+                    </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
                     <div className="field">
@@ -1235,6 +1283,39 @@ export function AdminScreen({
                         />
                         <span style={{ fontSize: 12 }}>Activer la sync</span>
                       </label>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginTop: 8 }}>
+                      <div className="field" style={{ flex: 1 }}>
+                        <span className="field-label">URL résultats équipe (public)</span>
+                        <input
+                          type="url"
+                          defaultValue={t.info.chronoplaceResultsUrl || ''}
+                          placeholder="https://www.chronoplace.fr/classement/.../equipe/..."
+                          onBlur={async (e) => {
+                            const raw = e.target.value.trim()
+                            const url = raw.length > 0 ? raw : undefined
+                            if (url === t.info.chronoplaceResultsUrl) return
+                            try {
+                              await onSetChronoplaceResultsUrl?.(t.info.id, url)
+                              pushToast(url ? 'URL équipe enregistrée' : 'URL équipe effacée', 'Check')
+                            } catch (err: any) {
+                              pushToast(err?.data?.message || err?.message || 'Erreur', 'AlertTriangle')
+                              e.target.value = t.info.chronoplaceResultsUrl || ''
+                            }
+                          }}
+                        />
+                      </div>
+                      {t.info.chronoplaceResultsUrl && (
+                        <a
+                          className="btn ghost"
+                          href={t.info.chronoplaceResultsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ fontSize: 12, padding: '6px 10px', textDecoration: 'none' }}
+                        >
+                          🔗 Ouvrir
+                        </a>
+                      )}
                     </div>
                     {t.info.chronoplaceSlug && chronoplaceEventId ? (
                       <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-2)', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>

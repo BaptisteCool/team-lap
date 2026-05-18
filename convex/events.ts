@@ -339,6 +339,32 @@ export const setChronoplaceEventId = mutation({
   },
 })
 
+// Set the public URL for the Chronoplace general classement.
+export const setChronoplaceClassementUrl = mutation({
+  args: { eventId: v.id('events'), url: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const url = (args.url || '').trim()
+    await ctx.db.patch(args.eventId, {
+      chronoplaceClassementUrl: url.length > 0 ? url : undefined,
+      updatedAt: Date.now(),
+    } as any)
+    return url
+  },
+})
+
+// Set the public URL for the organizer page (Miles Republic etc.).
+export const setOrganizerUrl = mutation({
+  args: { eventId: v.id('events'), url: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const url = (args.url || '').trim()
+    await ctx.db.patch(args.eventId, {
+      organizerUrl: url.length > 0 ? url : undefined,
+      updatedAt: Date.now(),
+    } as any)
+    return url
+  },
+})
+
 // Set max runners per team at event level. Refuses if any team would exceed.
 export const setMaxRunnersPerTeam = mutation({
   args: { eventId: v.id('events'), value: v.number() },

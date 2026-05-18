@@ -24,6 +24,9 @@ interface Lap {
   gapNext?: string | null
   autoRelay?: boolean
   forcedExtra?: boolean
+  source?: 'manual' | 'auto' | 'chronoplace'
+  chronoplaceId?: number
+  correctedByChronoplace?: boolean
 }
 
 interface Ranking {
@@ -56,8 +59,6 @@ interface HistoryScreenProps {
   onDeleteLap?: (lapId: string) => void
   onEditLapRunner?: (lapId: string, newRunnerId: string) => void
   onUpdateLap?: (lapId: string, payload: LapEditPayload) => void
-  onInsertLap?: (payload: LapEditPayload & { type: 'checkpoint_manual' | 'relay_manual' }) => void
-  onAddBulkRelay?: (payload: { runnerId: string; lapTimeMs: number; anchorMs: number; anchorKind: 'start' | 'end'; nbLaps: number; approximate: boolean }) => void
   minLapSec?: number
   maxLapSec?: number
   // Relay transition penalty (sec, default 7) — applied to expected times for relay laps
@@ -87,15 +88,12 @@ export function HistoryScreen({
   onDeleteLap,
   onEditLapRunner,
   onUpdateLap,
-  onInsertLap,
-  onAddBulkRelay,
   minLapSec = 165,
   maxLapSec = 480,
   relayTransitionSec = 5,
 }: HistoryScreenProps) {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
-  const [formMode, setFormMode] = useState<null | { kind: 'edit' | 'addAbove' | 'addBelow'; lap: Lap }>(null)
-  const [bulkOpen, setBulkOpen] = useState(false)
+  const [formMode, setFormMode] = useState<null | { kind: 'edit'; lap: Lap }>(null)
   // Mobile: cycle through lap-time displays — 0=lap time, 1=pace/km, 2=Paris real time, 3=race time
   const [mobileCycle, setMobileCycle] = useState<0 | 1 | 2 | 3>(0)
   const cycleNext = () => setMobileCycle((v) => ((v + 1) % 4) as 0 | 1 | 2 | 3)
@@ -410,16 +408,6 @@ export function HistoryScreen({
         <div className="card-head" style={{ flexWrap: 'wrap', gap: 8 }}>
           <span>📜</span>
           <h3>Historique{filterRunnerId ? ` · ${runners.find((r) => r.id === filterRunnerId)?.name || '—'}` : ''}</h3>
-          {onAddBulkRelay && (
-            <button
-              className="btn primary hide-on-mobile"
-              style={{ marginLeft: 'auto', fontSize: 13 }}
-              onClick={() => setBulkOpen(true)}
-              title="Ajouter ou recaler tout un relai d'un coup (rattrapage)"
-            >
-              ➕ Ajouter un relai
-            </button>
-          )}
         </div>
         <div className="card-body">
           {sortedLaps.length === 0 ? (
@@ -486,6 +474,47 @@ export function HistoryScreen({
                       >
                         {badge.label}
                       </span>
+                      {l.source === 'chronoplace' && (
+                        <span
+                          className="chip mono"
+                          style={{
+                            marginLeft: 6,
+                            padding: '1px 6px',
+                            fontSize: 10,
+                            background: 'oklch(0.72 0.18 200 / 0.18)',
+                            color: 'oklch(0.86 0.16 200)',
+                            border: '1px solid oklch(0.72 0.18 200 / 0.5)',
+                            cursor: l.chronoplaceId ? 'pointer' : 'default',
+                          }}
+                          title={l.chronoplaceId ? `Chronoplace id ${l.chronoplaceId} — cliquer pour voir le JSON` : 'Source Chronoplace'}
+                          onClick={() => {
+                            if (!l.chronoplaceId) return
+                            window.open(
+                              `https://www.chronoplace.fr/api/classement_live_endurance-detail/225/${(l as any).chronoplaceSlug ?? ''}`,
+                              '_blank',
+                              'noopener',
+                            )
+                          }}
+                        >
+                          🔄 chrono{l.chronoplaceId ? ` #${l.chronoplaceId}` : ''}
+                        </span>
+                      )}
+                      {l.correctedByChronoplace && (
+                        <span
+                          className="chip"
+                          style={{
+                            marginLeft: 6,
+                            padding: '1px 6px',
+                            fontSize: 10,
+                            background: 'oklch(0.86 0.20 135 / 0.18)',
+                            color: 'oklch(0.92 0.20 135)',
+                            border: '1px solid oklch(0.86 0.20 135 / 0.5)',
+                          }}
+                          title="Tour manuel corrigé / écrasé par Chronoplace"
+                        >
+                          ✓ corrigé
+                        </span>
+                      )}
                       {plusMinus && (
                         <span
                           className="chip mono"
@@ -549,7 +578,7 @@ export function HistoryScreen({
                       )}
                     </span>
                     <div style={{ position: 'relative' }}>
-                      {(onDeleteLap || onUpdateLap || onInsertLap) && (
+                      {(onDeleteLap || onUpdateLap) && (
                         <button
                           className="btn ghost icon"
                           style={{ padding: 4 }}
@@ -587,26 +616,8 @@ export function HistoryScreen({
                                 style={{ justifyContent: 'flex-start', fontSize: 13 }}
                                 onClick={() => { setMenuOpenId(null); setFormMode({ kind: 'edit', lap: l }) }}
                               >
-                                ✎ Modifier
+                                ✎ Modifier coureur
                               </button>
-                            )}
-                            {onInsertLap && (
-                              <>
-                                <button
-                                  className="btn ghost"
-                                  style={{ justifyContent: 'flex-start', fontSize: 13 }}
-                                  onClick={() => { setMenuOpenId(null); setFormMode({ kind: 'addAbove', lap: l }) }}
-                                >
-                                  ↑ Ajouter au-dessus
-                                </button>
-                                <button
-                                  className="btn ghost"
-                                  style={{ justifyContent: 'flex-start', fontSize: 13 }}
-                                  onClick={() => { setMenuOpenId(null); setFormMode({ kind: 'addBelow', lap: l }) }}
-                                >
-                                  ↓ Ajouter en-dessous
-                                </button>
-                              </>
                             )}
                             {onDeleteLap && (
                               <button
@@ -640,37 +651,17 @@ export function HistoryScreen({
         </div>
       </div>
 
-      {/* Bulk relay form */}
-      {bulkOpen && onAddBulkRelay && (
-        <BulkRelayForm
+      {/* Edit runner — single-field modal */}
+      {formMode && formMode.kind === 'edit' && onUpdateLap && (
+        <RunnerEditModal
+          lap={formMode.lap}
           runners={runners}
-          raceStartTime={raceStartTime || null}
-          minLapSec={minLapSec}
-          maxLapSec={maxLapSec}
-          onClose={() => setBulkOpen(false)}
-          onSubmit={(payload) => {
-            onAddBulkRelay(payload)
-            setBulkOpen(false)
-          }}
-        />
-      )}
-
-      {/* Edit / add lap form */}
-      {formMode && (
-        <LapForm
-          mode={formMode.kind}
-          anchorLap={formMode.lap}
-          allLaps={lapsAsc}
-          runners={runners}
-          runnersFull={runnersFull}
-          minLapSec={minLapSec}
           onClose={() => setFormMode(null)}
-          onSubmit={(payload) => {
-            if (formMode.kind === 'edit' && onUpdateLap) {
-              onUpdateLap(formMode.lap._id || formMode.lap.id, payload)
-            } else if ((formMode.kind === 'addAbove' || formMode.kind === 'addBelow') && onInsertLap) {
-              onInsertLap({ ...payload, type: payload.type || 'checkpoint_manual' })
-            }
+          onSubmit={(newRunnerId) => {
+            onUpdateLap(formMode.lap._id || formMode.lap.id, {
+              runnerId: newRunnerId,
+              timestamp: formMode.lap.timestamp,
+            })
             setFormMode(null)
           }}
         />
@@ -679,122 +670,29 @@ export function HistoryScreen({
   )
 }
 
-// Edit / Add lap form modal
-function LapForm({
-  mode,
-  anchorLap,
-  allLaps,
+// Minimal modal to change ONLY the runner of an existing lap.
+function RunnerEditModal({
+  lap,
   runners,
-  runnersFull,
-  minLapSec = 165,
   onClose,
   onSubmit,
 }: {
-  mode: 'edit' | 'addAbove' | 'addBelow'
-  anchorLap: Lap
-  allLaps: Lap[]
+  lap: Lap
   runners: Runner[]
-  runnersFull?: Array<{ id: string; energy?: number }>
-  minLapSec?: number
   onClose: () => void
-  onSubmit: (payload: LapEditPayload) => void
+  onSubmit: (runnerId: string) => void
 }) {
-  const MIN_LAP_MS = minLapSec * 1000
-  const initialTs = mode === 'edit'
-    ? anchorLap.timestamp
-    : mode === 'addAbove'
-      ? anchorLap.timestamp - 1000
-      : anchorLap.timestamp + 1000
-  const initialRunner = mode === 'edit'
-    ? anchorLap.runnerId
-    : (runners[0]?.id || '')
-  const initialEnergy = (() => {
-    const r = runnersFull?.find((x) => x.id === initialRunner)
-    return r?.energy ?? 100
-  })()
-  const [ts, setTs] = useState(mode === 'edit' ? toLocalDatetime(initialTs) : '')
-  const [runnerId, setRunnerId] = useState(initialRunner)
-  const [energy, setEnergy] = useState<number>(initialEnergy)
-  const [forcedExtra, setForcedExtra] = useState<boolean>(!!anchorLap.forcedExtra)
-  // Tour kind: first / intermediate / last (last → relay_manual, others → checkpoint_manual)
-  const initialKind: 'first' | 'intermediate' | 'last' = mode === 'edit'
-    ? (anchorLap.type === 'relay_manual' || anchorLap.type === 'relay_auto' ? 'last' : 'intermediate')
-    : 'intermediate'
-  const [lapKind, setLapKind] = useState<'first' | 'intermediate' | 'last'>(initialKind)
-  // Compute timestamp boundaries from neighboring laps (chronological)
-  const sortedLaps = [...allLaps].sort((a, b) => a.timestamp - b.timestamp)
-  const anchorIdx = sortedLaps.findIndex((l) => (l._id || l.id) === (anchorLap._id || anchorLap.id))
-  const prevLap = mode === 'edit'
-    ? sortedLaps[anchorIdx - 1]
-    : mode === 'addAbove'
-      ? sortedLaps[anchorIdx - 1]
-      : sortedLaps[anchorIdx]
-  const nextLap = mode === 'edit'
-    ? sortedLaps[anchorIdx + 1]
-    : mode === 'addAbove'
-      ? sortedLaps[anchorIdx]
-      : sortedLaps[anchorIdx + 1]
-  const minMs = prevLap ? prevLap.timestamp + MIN_LAP_MS : 0
-  const maxMs = nextLap ? nextLap.timestamp - MIN_LAP_MS : Infinity
-  const tsMs = ts ? new Date(ts).getTime() : NaN
-  const tsValid = isFinite(tsMs) && tsMs >= minMs && tsMs <= maxMs
-  const tsError = !ts
-    ? null
-    : !isFinite(tsMs)
-      ? 'Heure invalide.'
-      : tsMs < minMs
-        ? `Heure trop tôt — le tour précédent serait < ${fmtLap(MIN_LAP_MS)} (mini ${toLocalDatetime(minMs)})`
-        : tsMs > maxMs
-          ? `Heure trop tard — le tour suivant serait < ${fmtLap(MIN_LAP_MS)} (maxi ${toLocalDatetime(maxMs)})`
-          : null
-
-  const title = mode === 'edit'
-    ? `Modifier le tour n°${anchorLap.lapNumber ?? '—'}`
-    : mode === 'addAbove'
-      ? 'Ajouter un tour au-dessus'
-      : 'Ajouter un tour en-dessous'
-
+  const [runnerId, setRunnerId] = useState(lap.runnerId)
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
-          <h3>{title}</h3>
+          <h3>Modifier le coureur — tour n°{lap.lapNumber ?? '—'}</h3>
           <button className="btn ghost icon" style={{ marginLeft: 'auto' }} onClick={onClose}>✕</button>
         </div>
         <div className="modal-body grid" style={{ gap: 14 }}>
           <div className="hint">
-            L'allure et le temps au tour sont calculés automatiquement par l'application depuis l'heure du passage / relai.
-          </div>
-          <div className="field">
-            <span className="field-label">Type de tour *</span>
-            <select required value={lapKind} onChange={(e) => setLapKind(e.target.value as any)}>
-              <option value="first">Premier tour du relai</option>
-              <option value="intermediate">Tour intermédiaire</option>
-              <option value="last">Dernier tour du relai (relai)</option>
-            </select>
-          </div>
-          <div className="field">
-            <span className="field-label">Heure de passage / relai *</span>
-            <input
-              type="datetime-local"
-              step="1"
-              required
-              value={ts}
-              min={prevLap ? toLocalDatetime(minMs) : undefined}
-              max={nextLap ? toLocalDatetime(maxMs) : undefined}
-              onChange={(e) => setTs(e.target.value)}
-              onClick={(e) => { try { (e.currentTarget as any).showPicker?.() } catch (_) {} }}
-              onFocus={(e) => { try { (e.currentTarget as any).showPicker?.() } catch (_) {} }}
-              style={{ cursor: 'pointer', borderColor: tsError ? 'oklch(0.72 0.21 25 / 0.5)' : undefined }}
-            />
-            {tsError && (
-              <div className="hint" style={{ color: 'oklch(0.85 0.16 25)', marginTop: 4 }}>{tsError}</div>
-            )}
-            {!tsError && (prevLap || nextLap) && (
-              <div className="hint" style={{ marginTop: 4 }}>
-                Plage autorisée : {prevLap ? toLocalDatetime(minMs) : '—'} → {nextLap ? toLocalDatetime(maxMs) : '—'} (tour mini {fmtLap(MIN_LAP_MS)})
-              </div>
-            )}
+            Seul le coureur attribué à ce tour est modifiable. Heure, allure et type restent inchangés.
           </div>
           <div className="field">
             <span className="field-label">Coureur</span>
@@ -804,44 +702,13 @@ function LapForm({
               ))}
             </select>
           </div>
-          <div className="field">
-            <span className="field-label">Énergie</span>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {ENERGY_LEVELS.map((lvl) => (
-                <button
-                  key={lvl.value}
-                  type="button"
-                  onClick={() => setEnergy(lvl.value)}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: 8,
-                    border: '1px solid ' + (energy === lvl.value ? lvl.color : 'var(--border)'),
-                    background: energy === lvl.value ? lvl.color + '/0.18' : 'var(--bg-2)',
-                    color: energy === lvl.value ? lvl.color : 'var(--text-2)',
-                    fontSize: 13,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {lvl.short} · {lvl.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-            <input type="checkbox" checked={forcedExtra} onChange={(e) => setForcedExtra(e.target.checked)} />
-            <span style={{ fontSize: 13 }}>Marquer comme « tour + » (tour supplémentaire vs prévu)</span>
-          </label>
         </div>
         <div className="modal-foot">
           <button className="btn ghost" onClick={onClose}>Annuler</button>
           <button
             className="btn primary"
-            disabled={!tsValid || !runnerId}
-            onClick={() => {
-              if (!tsValid) return
-              const type: 'checkpoint_manual' | 'relay_manual' = lapKind === 'last' ? 'relay_manual' : 'checkpoint_manual'
-              onSubmit({ runnerId, timestamp: tsMs, forcedExtra, energy, type })
-            }}
+            disabled={!runnerId || runnerId === lap.runnerId}
+            onClick={() => onSubmit(runnerId)}
           >
             ✓ Enregistrer
           </button>
@@ -851,255 +718,6 @@ function LapForm({
   )
 }
 
-// Bulk relay form — add or recalibrate a complete relay (N laps for a runner)
-function BulkRelayForm({
-  runners,
-  raceStartTime,
-  minLapSec = 165,
-  maxLapSec = 480,
-  onClose,
-  onSubmit,
-}: {
-  runners: Runner[]
-  raceStartTime: number | null
-  minLapSec?: number
-  maxLapSec?: number
-  onClose: () => void
-  onSubmit: (payload: { runnerId: string; lapTimeMs: number; anchorMs: number; anchorKind: 'start' | 'end'; nbLaps: number; approximate: boolean }) => void
-}) {
-  const [approximate, setApproximate] = useState(true)
-  const anchorInputRef = useRef<HTMLInputElement | null>(null)
-  const [runnerId, setRunnerId] = useState(runners[0]?.id || '')
-  // Total relay time at the watch (end of relay) — H : M : S, default 0
-  const [totH, setTotH] = useState<number>(0)
-  const [totMin, setTotMin] = useState<number>(0)
-  const [totSec, setTotSec] = useState<number>(0)
-  const [nbLaps, setNbLaps] = useState<number>(5)
-  const [anchorKind, setAnchorKind] = useState<'start' | 'end'>('end')
-  const [anchorIso, setAnchorIso] = useState<string>('')
-  void raceStartTime
-
-  const totalMs = (totH * 3600 + totMin * 60 + totSec) * 1000
-  const LAP_DIST_M = 900
-  // Average pace per km — derived (read-only) from total + nbLaps. Watch pace can be inaccurate; user trusts nbLaps.
-  const lapMsComputed = nbLaps > 0 ? totalMs / nbLaps : 0
-  const paceSecPerKm = lapMsComputed > 0 ? (lapMsComputed / 1000) * (1000 / LAP_DIST_M) : 0
-  const paceMin = Math.floor(paceSecPerKm / 60)
-  const paceSec = Math.round(paceSecPerKm - paceMin * 60)
-  // Physical sanity bounds (configurable per event in admin)
-  const MIN_LAP_MS_BULK = minLapSec * 1000
-  const MAX_LAP_MS_BULK = maxLapSec * 1000
-  const lapTooFast = lapMsComputed > 0 && lapMsComputed < MIN_LAP_MS_BULK
-  const lapTooSlow = lapMsComputed > MAX_LAP_MS_BULK
-  const lapValid = lapMsComputed >= MIN_LAP_MS_BULK && lapMsComputed <= MAX_LAP_MS_BULK
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
-          <h3>Ajouter un relai complet</h3>
-          <button className="btn ghost icon" style={{ marginLeft: 'auto' }} onClick={onClose}>✕</button>
-        </div>
-        <div className="modal-body grid" style={{ gap: 14 }}>
-          <div className="hint">
-            Saisissez un relai complet d'un coup. Le temps montre = temps total relevé à la montre en fin de relai (pour tous les tours).
-            L'allure et le temps par tour sont calculés (total / nb tours). Les lignes d'historique correspondantes sont créées ou recalées (tolérance 8s).
-          </div>
-          <div className="field">
-            <span className="field-label">Coureur *</span>
-            <select required value={runnerId} onChange={(e) => setRunnerId(e.target.value)}>
-              {runners.map((r) => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <span className="field-label">Temps montre — total relai (h : min : sec) *</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-              <input
-                type="number"
-                min="0"
-                max="24"
-                required
-                className="mono"
-                value={totH}
-                onChange={(e) => setTotH(Math.max(0, +e.target.value || 0))}
-                style={{ width: 60, textAlign: 'center' }}
-                title="Heures"
-              />
-              <span style={{ color: 'var(--muted)' }}>:</span>
-              <input
-                type="number"
-                min="0"
-                max="59"
-                required
-                className="mono"
-                value={totMin}
-                onChange={(e) => setTotMin(Math.min(59, Math.max(0, +e.target.value || 0)))}
-                style={{ width: 60, textAlign: 'center' }}
-                title="Minutes"
-              />
-              <span style={{ color: 'var(--muted)' }}>:</span>
-              <input
-                type="number"
-                min="0"
-                max="59"
-                required
-                className="mono"
-                value={totSec}
-                onChange={(e) => setTotSec(Math.min(59, Math.max(0, +e.target.value || 0)))}
-                style={{ width: 60, textAlign: 'center' }}
-                title="Secondes"
-              />
-            </div>
-          </div>
-          <div className="field">
-            <span className="field-label">Nombre de tours *</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <button
-                type="button"
-                className="btn ghost icon"
-                onClick={() => setNbLaps((n) => Math.max(1, n - 1))}
-                title="Moins"
-                style={{ fontSize: 16, padding: '4px 10px' }}
-              >
-                −
-              </button>
-              <input
-                type="number"
-                min="1"
-                max="40"
-                required
-                className="mono"
-                value={nbLaps}
-                onChange={(e) => setNbLaps(Math.max(1, Math.min(40, +e.target.value || 1)))}
-                style={{ width: 80, textAlign: 'center' }}
-              />
-              <button
-                type="button"
-                className="btn ghost icon"
-                onClick={() => setNbLaps((n) => Math.min(40, n + 1))}
-                title="Plus"
-                style={{ fontSize: 16, padding: '4px 10px' }}
-              >
-                +
-              </button>
-            </div>
-          </div>
-          <div className="hint mono">
-            Calculé : temps tour <strong>{fmtLap(lapMsComputed)}</strong> · allure <strong>{paceMin}:{String(paceSec).padStart(2, '0')}/km</strong>
-            {' '}({nbLaps} tour{nbLaps > 1 ? 's' : ''} × {fmtLap(lapMsComputed)} = {fmtLap(totalMs)})
-          </div>
-          {lapTooFast && (
-            <div className="hint" style={{ color: 'oklch(0.85 0.16 25)' }}>
-              ⚠️ Tour trop rapide ({fmtLap(lapMsComputed)}) — minimum {fmtLap(MIN_LAP_MS_BULK)} / tour. Ajustez total ou nb tours.
-            </div>
-          )}
-          {lapTooSlow && (
-            <div className="hint" style={{ color: 'oklch(0.85 0.16 25)' }}>
-              ⚠️ Tour trop lent ({fmtLap(lapMsComputed)}) — maximum {fmtLap(MAX_LAP_MS_BULK)} / tour. Ajustez total ou nb tours.
-            </div>
-          )}
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={approximate}
-              onChange={(e) => setApproximate(e.target.checked)}
-            />
-            <span style={{ fontSize: 13 }}>Valeurs approximatives — badge ≈ approx.</span>
-          </label>
-          <div className="field">
-            <span className="field-label">Ancrage horaire</span>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => setAnchorKind('start')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 8,
-                  border: '1px solid ' + (anchorKind === 'start' ? 'var(--accent)' : 'var(--border)'),
-                  background: anchorKind === 'start' ? 'oklch(0.86 0.20 135 / 0.18)' : 'var(--bg-2)',
-                  color: anchorKind === 'start' ? 'oklch(0.92 0.20 135)' : 'var(--text-2)',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                Heure de début
-              </button>
-              <button
-                type="button"
-                onClick={() => setAnchorKind('end')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 8,
-                  border: '1px solid ' + (anchorKind === 'end' ? 'var(--accent)' : 'var(--border)'),
-                  background: anchorKind === 'end' ? 'oklch(0.86 0.20 135 / 0.18)' : 'var(--bg-2)',
-                  color: anchorKind === 'end' ? 'oklch(0.92 0.20 135)' : 'var(--text-2)',
-                  fontSize: 13,
-                  cursor: 'pointer',
-                }}
-              >
-                Heure de fin
-              </button>
-            </div>
-          </div>
-          <div className="field">
-            <span className="field-label">{anchorKind === 'start' ? 'Heure de début du relai *' : 'Heure de fin du relai *'}</span>
-            <input
-              ref={anchorInputRef}
-              type="datetime-local"
-              step="1"
-              required
-              value={anchorIso}
-              onChange={(e) => setAnchorIso(e.target.value)}
-              onClick={(e) => { try { (e.currentTarget as any).showPicker?.() } catch (_) {} }}
-              onFocus={(e) => { try { (e.currentTarget as any).showPicker?.() } catch (_) {} }}
-              style={{ cursor: 'pointer' }}
-            />
-            <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                className="btn ghost"
-                style={{ fontSize: 12, padding: '4px 10px' }}
-                onClick={() => setAnchorIso(toLocalDatetime(Date.now()))}
-              >
-                📅 Maintenant
-              </button>
-              <button
-                type="button"
-                className="btn ghost"
-                style={{ fontSize: 12, padding: '4px 10px' }}
-                onClick={() => {
-                  try { anchorInputRef.current?.blur() } catch (_) {}
-                }}
-                title="Fermer la dialogue calendrier"
-              >
-                ✕ Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="modal-foot">
-          <button className="btn ghost" onClick={onClose}>Annuler</button>
-          <button
-            className="btn primary"
-            disabled={!lapValid || !runnerId || !anchorIso}
-            onClick={() => {
-              const ms = new Date(anchorIso).getTime()
-              if (!isFinite(ms)) return
-              const lapTimeMs = nbLaps > 0 ? Math.round(totalMs / nbLaps) : 0
-              if (lapTimeMs <= 0) return
-              if (!lapValid) return
-              onSubmit({ runnerId, lapTimeMs, anchorMs: ms, anchorKind, nbLaps, approximate })
-            }}
-          >
-            ✓ Enregistrer le relai
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // Simple inline SVG line chart for position evolution (stepAfter, reversed Y)
 function PositionChart({ data }: { data: Array<{ t: number; pos: number }> }) {

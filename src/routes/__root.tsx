@@ -60,7 +60,15 @@ export const Route = createRootRoute({
     const RACE_MS = (event?.raceDuration as number) || 24 * 3600 * 1000
     const scheduledStartMs = (event?.scheduledStart as number) || null
 
-    const elapsed = raceStartTime ? Math.max(0, Math.min(now - raceStartTime, RACE_MS)) : 0
+    // En testMode, l'affichage timeline est "virtuel" : 1 sec de mur = N sec de course
+    // affichée (N = testModeDivider). Ça fait que LIVE écoulé + remaining s'affichent
+    // accélérés et collent au rythme des laps mock compressés.
+    const testMode = (event as any)?.testMode === true
+    const testDivider = (event as any)?.testModeDivider || 3
+    const displayMul = testMode && testDivider > 0 ? testDivider : 1
+
+    const wallElapsed = raceStartTime ? Math.max(0, now - raceStartTime) : 0
+    const elapsed = Math.min(wallElapsed * displayMul, RACE_MS)
     const remaining = raceStartTime ? Math.max(0, RACE_MS - elapsed) : RACE_MS
     const tilStart = scheduledStartMs ? scheduledStartMs - now : null
 

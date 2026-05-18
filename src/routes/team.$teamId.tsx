@@ -252,6 +252,12 @@ function TeamPage() {
         profileImage: teamData.profileImage,
         contactName: teamData.contactName,
         contactPhone: teamData.contactPhone,
+        chronoSyncEnabled: teamData.chronoSyncEnabled,
+        chronoplaceSlug: teamData.chronoplaceSlug,
+        chronoSyncError: teamData.chronoSyncError,
+        lastChronoSyncAt: teamData.lastChronoSyncAt,
+        nextExpectedChronoplaceId: teamData.nextExpectedChronoplaceId,
+        nextExpectedLapMs: teamData.nextExpectedLapMs,
       })
       if (teamData.runners && teamData.runners.length > 0) {
         const augmented = teamData.runners.map((r: any, idx: number) => ({
@@ -449,7 +455,7 @@ function TeamPage() {
 
   return (
     <div className={`page ${readonly ? 'is-readonly' : ''}`}>
-      <TestModeBadge testMode={(event as any)?.testMode} />
+      <TestModeBadge testMode={(event as any)?.testMode} testModeDivider={(event as any)?.testModeDivider} />
       <div className="grid" style={{ gap: 14, maxWidth: 1280, margin: '0 auto' }}>
         <div className="card" style={{ padding: '8px 12px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
@@ -708,37 +714,6 @@ function TeamPage() {
                 type: payload.type,
               }).catch((err: any) => console.error('updateLap:', err))
               if (payload.energy != null && teamData?._id) {
-                const r = (runners as any[]).find((x) => x.id === payload.runnerId)
-                if (r) {
-                  upsertRunnerMutation({
-                    teamId: teamData._id,
-                    runner: { ...r, energy: payload.energy },
-                  }).catch((err: any) => console.error('upsertRunner energy:', err))
-                }
-              }
-            }}
-            onAddBulkRelay={readonly ? undefined : (p) => {
-              if (!teamData?._id) return
-              addBulkRelayMutation({
-                teamId: teamData._id,
-                runnerId: p.runnerId,
-                lapTimeMs: p.lapTimeMs,
-                anchorMs: p.anchorMs,
-                anchorKind: p.anchorKind,
-                nbLaps: p.nbLaps,
-                approximate: p.approximate,
-              }).catch((err: any) => console.error('addBulkRelay:', err))
-            }}
-            onInsertLap={readonly ? undefined : (payload) => {
-              if (!teamData?._id) return
-              insertLapAtMutation({
-                teamId: teamData._id,
-                runnerId: payload.runnerId,
-                timestamp: payload.timestamp,
-                type: payload.type,
-                forcedExtra: payload.forcedExtra,
-              }).catch((err: any) => console.error('insertLapAt:', err))
-              if (payload.energy != null) {
                 const r = (runners as any[]).find((x) => x.id === payload.runnerId)
                 if (r) {
                   upsertRunnerMutation({
