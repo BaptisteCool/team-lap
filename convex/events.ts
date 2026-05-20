@@ -430,13 +430,16 @@ export const setFirstLapDistance = mutation({
 })
 
 export const setLapDistance = mutation({
-  args: { eventId: v.id('events'), lapDistance: v.number(), superAdminPin: v.optional(v.string()) },
+  args: { eventId: v.id('events'), lapDistance: v.number(), superAdminPin: v.string() },
   handler: async (ctx, args) => {
     if (args.lapDistance <= 0) {
       throw new ConvexError('lapDistance doit être > 0')
     }
     const event = await ctx.db.get(args.eventId)
     if (!event) throw new ConvexError('Event introuvable')
+    if (args.superAdminPin !== (event as any).superAdminPin) {
+      throw new ConvexError('Unauthorized')
+    }
     if ((event as any).firstLapDistanceM != null && (event as any).firstLapDistanceM >= args.lapDistance) {
       throw new ConvexError('firstLapDistanceM doit être < lapDistance')
     }
