@@ -1,5 +1,5 @@
 {
-  "buildCommand": "npx convex deploy --preview-run seed:seedAll --cmd 'npm run build'",
+  "buildCommand": "npx convex deploy --cmd 'npm run build'",
   "rewrites": [
     { "source": "/((?!.*\\.).*)", "destination": "/index.html" }
   ]
