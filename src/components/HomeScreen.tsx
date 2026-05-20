@@ -34,10 +34,11 @@ interface TeamFull {
 }
 
 interface HomeScreenProps {
+  eventSlug: string
   onPickTeam: (teamId: string) => void
 }
 
-export function HomeScreen({ onPickTeam }: HomeScreenProps) {
+export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   const navigate = useNavigate()
   const [now, setNow] = useState(Date.now())
 
@@ -58,7 +59,7 @@ export function HomeScreen({ onPickTeam }: HomeScreenProps) {
   }, [autoTickMutation])
 
   // Get the event by slug
-  const event = useQuery('events:getBySlug' as any, { slug: '24h-brette-les-pins-2026' }) as any
+  const event = useQuery('events:getBySlug' as any, { slug: eventSlug }) as any
 
   // Presence heartbeat — required to keep server-side burst chain alive
   // (scheduleNextAutoBurst exits early when hasViewers === false).
