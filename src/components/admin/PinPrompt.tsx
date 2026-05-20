@@ -39,6 +39,7 @@ export function PinPrompt({ onSuccess }: PinPromptProps) {
       const result = await convex.query('superAdmin:validateSuperAdminPin' as any, { pin })
       if ((result as any)?.ok === true) {
         sessionStorage.setItem('superAdminAuth', 'ok')
+        sessionStorage.setItem('superAdminPin', pin)
         setError(null)
         onSuccess()
       } else {
