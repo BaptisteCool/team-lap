@@ -2,7 +2,6 @@ import React from 'react'
 import {
   DEFAULT_PLANNED_LAPS,
   kmPaceToLapMs,
-  LAP_DISTANCE_M,
   RUNNER_PALETTE,
 } from '../lib/race-data'
 import { EnergySegment } from './EnergySegment'
@@ -45,9 +44,10 @@ interface SetupScreenProps {
   maxRunnersPerTeam?: number
   // False once race started → delete is locked (integrity of laps / currentIdx / ranking)
   canDeleteRunner?: boolean
+  lapDistanceM?: number
 }
 
-export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, minLapSec = 165, maxLapSec = 480, maxRunnersPerTeam, canDeleteRunner = true }: SetupScreenProps) {
+export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, minLapSec = 165, maxLapSec = 480, maxRunnersPerTeam, canDeleteRunner = true, lapDistanceM = 900 }: SetupScreenProps) {
   const [editPaceFor, setEditPaceFor] = React.useState<{ runnerId: string; min: number; sec: number } | null>(null)
   const [editPlannedFor, setEditPlannedFor] = React.useState<string | null>(null)
   const [addRunnerOpen, setAddRunnerOpen] = React.useState(false)
@@ -115,17 +115,17 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
 
   // Team stats — only count active (non-out) runners
   const active = runners.filter(r => r.status !== 'out')
-  const totalLapMs = active.reduce((acc, r) => acc + kmPaceToLapMs(r.kmMin, r.kmSec), 0)
+  const totalLapMs = active.reduce((acc, r) => acc + kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM), 0)
   const avgLapMs = active.length ? totalLapMs / active.length : 0
   const projectedLaps = avgLapMs ? Math.floor((24 * 3600 * 1000) / avgLapMs) : 0
-  const projectedKm = ((projectedLaps * LAP_DISTANCE_M) / 1000).toFixed(1)
+  const projectedKm = ((projectedLaps * lapDistanceM) / 1000).toFixed(1)
 
   const ready = team.name.trim() && active.length >= 2 && runners.every(r => r.name.trim())
 
   // Helper function to format pace
   function fmtPace(ms: number): string {
     if (!ms || ms <= 0) return '—'
-    const secPerKm = (ms / 1000) * (1000 / LAP_DISTANCE_M)
+    const secPerKm = (ms / 1000) * (1000 / lapDistanceM)
     const m = Math.floor(secPerKm / 60)
     const s = Math.round(secPerKm % 60)
     return `${m}:${String(s).padStart(2, '0')}/km`
@@ -320,13 +320,13 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
             <div className="card-head">
               <span>🗺️</span>
               <h3>Circuit · 24h de course à pied 2026</h3>
-              <span className="badge accent">{LAP_DISTANCE_M} m / tour</span>
+              <span className="badge accent">{lapDistanceM} m / tour</span>
             </div>
             <div className="card-body">
               <div className="stat-row" style={{ marginTop: 14 }}>
                 <div className="stat">
                   <div className="stat-label">Tour de référence</div>
-                  <div className="stat-value mono">{LAP_DISTANCE_M} m</div>
+                  <div className="stat-value mono">{lapDistanceM} m</div>
                 </div>
                 <div className="stat">
                   <div className="stat-label">Allure moy. équipe</div>
@@ -370,7 +370,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
             )}
             <div className="grid" style={{ gap: 10 }}>
               {runners.map(r => {
-                const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+                const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM)
                 return (
                   <div
                     key={r.id}
@@ -551,7 +551,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
       </div>
 
       {addRunnerOpen && (() => {
-        const lapMs = kmPaceToLapMs(addPaceMin, addPaceSec)
+        const lapMs = kmPaceToLapMs(addPaceMin, addPaceSec, lapDistanceM)
         const minMs = minLapSec * 1000
         const maxMs = maxLapSec * 1000
         const paceValid = lapMs >= minMs && lapMs <= maxMs
@@ -659,7 +659,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
       })()}
 
       {editPaceFor && (() => {
-        const lapMs = kmPaceToLapMs(editPaceFor.min, editPaceFor.sec)
+        const lapMs = kmPaceToLapMs(editPaceFor.min, editPaceFor.sec, lapDistanceM)
         const minMs = minLapSec * 1000
         const maxMs = maxLapSec * 1000
         const valid = lapMs >= minMs && lapMs <= maxMs

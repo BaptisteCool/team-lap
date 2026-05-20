@@ -42,6 +42,7 @@ function EventAdminPage() {
   const updatePasswordMutation = useMutation('events:updateAdminPassword' as any)
   const updateReplaceAutoWindowMutation = useMutation('events:updateReplaceAutoWindow' as any)
   const setFirstLapDistanceMutation = useMutation('events:setFirstLapDistance' as any)
+  const setLapDistanceMutation = useMutation('events:setLapDistance' as any)
   const setTestModeDividerMutation = useMutation('events:setTestModeDivider' as any)
   const setMaxRunnersPerTeamMutation = useMutation('events:setMaxRunnersPerTeam' as any)
   const setLatLngMutation = useMutation('events:setLatLng' as any)
@@ -524,6 +525,11 @@ function EventAdminPage() {
         onEndRace={async () => {
           if (!event?._id) throw new Error('Événement non chargé')
           await endRaceMutation({ eventId: event._id })
+        }}
+        lapDistance={(event as any)?.lapDistance ?? 900}
+        onSetLapDistance={async (meters: number) => {
+          if (!event?._id) throw new Error('Événement non chargé')
+          await setLapDistanceMutation({ eventId: event._id, lapDistance: meters })
         }}
       />
       {/* Toast notifications */}

@@ -169,7 +169,7 @@ export const recordLap = mutation({
         const adjustedLapTime = args.change
           ? Math.max(MIN_LAP_GAP_MS, lapTime - relayTransitionMs)
           : lapTime
-        const lapDistanceM = 900
+        const lapDistanceM = (event as any)?.lapDistance ?? 900
         const secPerKm = (adjustedLapTime / 1000) * (1000 / lapDistanceM)
         const min = Math.floor(secPerKm / 60)
         const sec = Math.round(secPerKm - min * 60)
@@ -436,8 +436,7 @@ async function applyLap(
   // Relay handover penalty (5s) is now charged to THIS lap if it's a relay (outgoing
   // runner's last lap), not to the first lap after a relay. Snapshot the offset on
   // relay laps so the UI / pace calculators can read back what was applied.
-  const eventForFlag = await ctx.db.get(team.eventId)
-  const tApply = getEffectiveTimings(eventForFlag)
+  const tApply = getEffectiveTimings(event)
   const isFirstAfterRelay = undefined
   const relayTransitionMsApplied = isRelay ? tApply.relayTransitionSec * 1000 : undefined
 
@@ -463,7 +462,8 @@ async function applyLap(
     // lapTime). Next time this runner relays, decideAutoLap uses this pace directly without
     // re-adding the +5s offset. Skipped if lapTime is below the debounce floor.
     if (runnerForLap && lapTime >= MIN_LAP_GAP_MS) {
-      const pace = kmPaceFromLapMs(lapTime)
+      const lapDistanceM = (event as any)?.lapDistance ?? 900
+      const pace = kmPaceFromLapMs(lapTime, lapDistanceM)
       await ctx.db.patch(runnerForLap._id, {
         theoreticalRelayPaceMin: pace.min,
         theoreticalRelayPaceSec: pace.sec,

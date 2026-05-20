@@ -57,6 +57,7 @@ interface PlanningScreenProps {
   theoreticalCycleMs?: number | null
   // Viewer mode public — masque ordre des relais, cycle complet, groupes, boutons retour/continuer
   readonly?: boolean
+  lapDistanceM?: number
 }
 
 export function PlanningScreen({
@@ -84,6 +85,7 @@ export function PlanningScreen({
   weatherCityName,
   theoreticalCycleMs,
   readonly = false,
+  lapDistanceM = 900,
 }: PlanningScreenProps) {
   // Helper: pick hourly index closest to a target ms epoch.
   function weatherIndexForTime(target: number): number | null {
@@ -266,7 +268,7 @@ export function PlanningScreen({
     }
   }
 
-  const totalMs = expandedSequence.reduce((a, s) => a + kmPaceToLapMs(s.runner.kmMin, s.runner.kmSec), 0)
+  const totalMs = expandedSequence.reduce((a, s) => a + kmPaceToLapMs(s.runner.kmMin, s.runner.kmSec, lapDistanceM), 0)
 
   // Helper functions
   function fmtLap(ms: number): string {
@@ -299,7 +301,7 @@ export function PlanningScreen({
               {order.map((id, idx) => {
                 const r = getRunner(id)
                 if (!r) return null
-                const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+                const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM)
                 const isOut = r.status === 'out'
                 return (
                   <div
@@ -718,7 +720,7 @@ export function PlanningScreen({
                         firstCurrentSeen = true
                       }
                     } else {
-                      lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+                      lapMs = kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM)
                     }
                     cum += lapMs
                     return { s, eta: new Date(startMs + cum), originalIdx: i }
@@ -824,7 +826,7 @@ export function PlanningScreen({
                             // Current runner: derive pace from his EFFECTIVE lap time (live/manual override),
                             // consistent with the ETA above. Fallback to target if expectedLapMs missing/zero.
                             if (r.id === currentRunnerId && currentRunnerExpectedLapMs && currentRunnerExpectedLapMs > 0) {
-                              const p = lapMsToKmPace(currentRunnerExpectedLapMs)
+                              const p = lapMsToKmPace(currentRunnerExpectedLapMs, lapDistanceM)
                               if (p && (p.min > 0 || p.sec > 0)) return fmtKmPace(p.min, p.sec)
                             }
                             return fmtKmPace(r.kmMin, r.kmSec)

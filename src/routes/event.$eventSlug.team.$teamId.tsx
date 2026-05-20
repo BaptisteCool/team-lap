@@ -420,7 +420,7 @@ function EventTeamPage() {
     if (!teamData?._id) return
     if (!runners || runners.length === 0) return
     const raceDur = event?.raceDuration || 24 * 3600 * 1000
-    const estimate = estimateGoalLaps(runners as any, order, raceDur)
+    const estimate = estimateGoalLaps(runners as any, order, raceDur, (event as any)?.lapDistance || 900)
     if (estimate > 0 && estimate !== teamData.goalLaps) {
       updateTeamMutation({ teamId: teamData._id, updates: { goalLaps: estimate } }).catch((err: any) =>
         console.error('auto goalLaps update:', err),
@@ -539,6 +539,7 @@ function EventTeamPage() {
             runners={runners}
             setRunners={setRunnersPersist}
             onContinue={() => setActiveTab('planning')}
+            lapDistanceM={(event as any)?.lapDistance ?? 900}
             minLapSec={(event as any)?.minLapSec ?? 5}
             maxLapSec={(event as any)?.maxLapSec ?? 3600}
             maxRunnersPerTeam={(event as any)?.maxRunnersPerTeam ?? 10}
@@ -666,6 +667,7 @@ function EventTeamPage() {
                 console.error('set currentIdx:', err),
               )
             }}
+            lapDistanceM={(event as any)?.lapDistance ?? 900}
             replaceAutoWindowSec={(event as any)?.replaceAutoWindowSec ?? 180}
             minLapSec={(event as any)?.minLapSec ?? 5}
             relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}

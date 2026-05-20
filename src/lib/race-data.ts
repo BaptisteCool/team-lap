@@ -20,7 +20,7 @@ export function fmtLap(ms: number): string {
 }
 
 // Format pace to min/km
-export function fmtPace(ms: number, distM = LAP_DISTANCE_M): string {
+export function fmtPace(ms: number, distM: number): string {
   if (!ms || ms <= 0) return '—'
   const secPerKm = (ms / 1000) * (1000 / distM)
   const m = Math.floor(secPerKm / 60)
@@ -29,7 +29,7 @@ export function fmtPace(ms: number, distM = LAP_DISTANCE_M): string {
 }
 
 // Convert km pace (min/km) to lap time in milliseconds
-export function kmPaceToLapMs(kmMin: number, kmSec: number, lapDistanceM = 900): number {
+export function kmPaceToLapMs(kmMin: number, kmSec: number, lapDistanceM: number): number {
   const paceSeconds = kmMin * 60 + kmSec
   const lapSeconds = (paceSeconds * lapDistanceM) / 1000
   return Math.round(lapSeconds * 1000)
@@ -39,10 +39,6 @@ export function kmPaceToLapMs(kmMin: number, kmSec: number, lapDistanceM = 900):
 export const GPX_PATH = "M99 121 L97.2 132.4 L96.3 143.5 L103.7 149.0 L121.4 149.0 L140.9 156.0 L156.7 158.7 L172.6 164.3 L183.7 167.1 L185.6 189.3 L182.8 204.5 L177.2 218.4 L174.4 232.3 L166.0 239.2 L143.7 239.2 L118.6 232.3 L100.9 228.1 L79.5 224.0 L63.7 219.8 L56.3 217.0 L49.8 218.4 L20.0 167.1 L35.8 137.9 L53.5 112.9 L80.5 75.5 L100.0 50.5 L128.8 40.8 L142.8 40.8 L159.5 46.3 L188.4 61.6 L222.8 83.8 L248.8 94.9 L270.2 107.4 L289.8 112.9 L311.2 115.7 L329.8 115.7 L346.5 111.5 L357.7 108.8 L371.6 108.8 L380.0 124.0 L379.1 136.5 L377.2 151.8 L363.3 154.6 L354.9 143.5 L347.4 135.1 L331.6 149.0 L314.0 153.2 L283.3 147.6 L264.7 140.7 L244.2 133.8 L220.0 129.6 L199.5 119.9 L175.3 110.2 L150.2 100.4 L127.0 94.9 L107.4 94.9 L100.9 110.2 Z"
 
 export const GPX_VIEWBOX = "0 0 400 280"
-
-// Lap distance in meters
-export const LAP_DISTANCE_M = 900
-export const LAP_DISTANCE_M_MEASURED = 934
 
 // Energy levels
 export const ENERGY_LEVELS = [
@@ -95,28 +91,29 @@ export function computeTeamProgress(
   raceStarted: boolean,
   raceStartTime: number | null,
   now: number,
-  kmPaceToLapMsFn: typeof kmPaceToLapMs
+  kmPaceToLapMsFn: typeof kmPaceToLapMs,
+  lapDistanceM: number = 900,
 ): number {
   if (!raceStarted || !raceStartTime) return 0
   const laps = team.laps || []
   const order = team.order || []
   const runners = team.runners || []
   if (order.length === 0) return 0
-  
+
   const lastLapAt = laps.length ? laps[laps.length - 1].timestamp : raceStartTime
   const currentRunnerId = order[(team.currentIdx || 0) % order.length]
   const runner = runners.find((r: any) => r.id === currentRunnerId)
   if (!runner) return 0
-  
+
   const lastLap = laps.length ? laps[laps.length - 1] : null
   let expectedLapMs: number
-  
+
   if (runner.liveKmMin != null) {
-    expectedLapMs = kmPaceToLapMsFn(runner.liveKmMin, runner.liveKmSec)
+    expectedLapMs = kmPaceToLapMsFn(runner.liveKmMin, runner.liveKmSec, lapDistanceM)
   } else if (lastLap && lastLap.runnerId === runner.id) {
     expectedLapMs = lastLap.lapTime
   } else {
-    expectedLapMs = kmPaceToLapMsFn(runner.kmMin, runner.kmSec)
+    expectedLapMs = kmPaceToLapMsFn(runner.kmMin, runner.kmSec, lapDistanceM)
   }
   
   if (!expectedLapMs || expectedLapMs <= 0) return 0
@@ -141,7 +138,7 @@ export function toLocalDatetime(ms: number | null): string {
 }
 
 // Convert lap time (ms) → km pace (min/sec per km)
-export function lapMsToKmPace(lapMs: number, lapDistanceM = LAP_DISTANCE_M): { min: number; sec: number } {
+export function lapMsToKmPace(lapMs: number, lapDistanceM: number): { min: number; sec: number } {
   if (!lapMs || lapMs <= 0) return { min: 0, sec: 0 }
   const secPerKm = (lapMs / 1000) * (1000 / lapDistanceM)
   const min = Math.floor(secPerKm / 60)
@@ -167,8 +164,9 @@ function energyPaceFactor(energy: number): number {
 export function getRunnerPace(
   runner: { kmMin: number; kmSec: number; energy: number; liveKmMin?: number | null; liveKmSec?: number | null; id: string },
   race: { laps?: any[] } | null | undefined,
+  lapDistanceM: number,
 ): { actualLapMs: number | null; baseLapMs: number; effectiveLapMs: number; source: 'override' | 'live' | 'base'; energyFactor: number; kmMin: number; kmSec: number } {
-  const rawBaseLapMs = kmPaceToLapMs(runner.kmMin, runner.kmSec)
+  const rawBaseLapMs = kmPaceToLapMs(runner.kmMin, runner.kmSec, lapDistanceM)
   const energyFactor = energyPaceFactor(runner.energy)
   const baseLapMs = Math.round(rawBaseLapMs * energyFactor)
   const real = race?.laps?.filter((l: any) => l.runnerId === runner.id) || []
@@ -176,7 +174,7 @@ export function getRunnerPace(
   // Reject absurd lap pace (must be 2:00..15:00/km)
   let actualLapMs: number | null = lastLap ? lastLap.lapTime : null
   if (actualLapMs != null) {
-    const km = lapMsToKmPace(actualLapMs)
+    const km = lapMsToKmPace(actualLapMs, lapDistanceM)
     const sec = km.min * 60 + km.sec
     if (sec < 2 * 60 || sec > 15 * 60) actualLapMs = null
   }
@@ -187,12 +185,12 @@ export function getRunnerPace(
     runner.liveKmSec != null &&
     overrideSecPerKm >= 2 * 60 &&
     overrideSecPerKm <= 15 * 60
-  const overrideLapMs = isReasonableOverride ? kmPaceToLapMs(runner.liveKmMin!, runner.liveKmSec!) : null
+  const overrideLapMs = isReasonableOverride ? kmPaceToLapMs(runner.liveKmMin!, runner.liveKmSec!, lapDistanceM) : null
   let effectiveLapMs: number, source: 'override' | 'live' | 'base'
   if (overrideLapMs != null) { effectiveLapMs = overrideLapMs; source = 'override' }
   else if (actualLapMs != null) { effectiveLapMs = actualLapMs; source = 'live' }
   else { effectiveLapMs = baseLapMs; source = 'base' }
-  const km = lapMsToKmPace(effectiveLapMs)
+  const km = lapMsToKmPace(effectiveLapMs, lapDistanceM)
   return { actualLapMs, baseLapMs, effectiveLapMs, source, energyFactor, kmMin: km.min, kmSec: km.sec }
 }
 
@@ -214,6 +212,7 @@ export function estimateGoalLaps(
   runners: Array<{ id: string; kmMin: number; kmSec: number; plannedLaps?: number; status?: string }>,
   order: string[],
   raceDurationMs: number = 24 * 3600 * 1000,
+  lapDistanceM: number = 900,
 ): number {
   const activeOrder = order.filter((id) => {
     const r = runners.find((x) => x.id === id)
@@ -226,7 +225,7 @@ export function estimateGoalLaps(
     const r = runners.find((x) => x.id === id)
     if (!r) continue
     const planned = Math.max(1, r.plannedLaps || 1)
-    const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+    const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM)
     cycleMs += lapMs * planned
     lapsPerCycle += planned
   }

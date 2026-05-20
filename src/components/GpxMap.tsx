@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { GPX_PATH, GPX_VIEWBOX, LAP_DISTANCE_M } from '../lib/race-data'
+import { GPX_PATH, GPX_VIEWBOX } from '../lib/race-data'
 
 interface Marker {
   id: string
@@ -18,9 +18,10 @@ interface GpxMapProps {
   markerLabel?: string
   markerSubLabel?: string
   markerColor?: string
+  lapDistanceM?: number
 }
 
-export function GpxMap({ height, marker, progress, showLabel = true, markers, markerLabel, markerSubLabel, markerColor }: GpxMapProps) {
+export function GpxMap({ height, marker, progress, showLabel = true, markers, markerLabel, markerSubLabel, markerColor, lapDistanceM }: GpxMapProps) {
   const pathRef = useRef<SVGPathElement>(null)
   const [computedMarker, setComputedMarker] = useState<{ x: number; y: number } | null>(null)
   const [computedMulti, setComputedMulti] = useState<Array<Marker & { x: number; y: number }>>([])
@@ -144,8 +145,8 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers, ma
           )
         })}
       </svg>
-      {showLabel && (
-        <div className="map-meta">{LAP_DISTANCE_M} m / tour · 56 pts GPX</div>
+      {showLabel && lapDistanceM != null && (
+        <div className="map-meta">{lapDistanceM} m / tour · 56 pts GPX</div>
       )}
     </div>
   )
