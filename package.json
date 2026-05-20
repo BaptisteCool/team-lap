@@ -16,6 +16,7 @@
     "reset:convex": "npx convex dev --local --once && npm run reset"
   },
   "dependencies": {
+    "@hookform/resolvers": "^5.2.2",
     "@tanstack/react-router": "^1.45.0",
     "@tanstack/router-plugin": "^1.45.0",
     "class-variance-authority": "^0.7.0",
@@ -24,7 +25,9 @@
     "lucide-react": "^0.378.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "tailwind-merge": "^2.3.0"
+    "react-hook-form": "^7.76.0",
+    "tailwind-merge": "^2.3.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
