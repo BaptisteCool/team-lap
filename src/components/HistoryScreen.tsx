@@ -1,5 +1,5 @@
-import React, { useMemo, useRef, useState } from 'react'
-import { ENERGY_LEVELS, fmtClock, fmtLap, fmtPace, isAutoType, isRelayType, kmPaceToLapMs, toLocalDatetime } from '../lib/race-data'
+import React, { useMemo, useState } from 'react'
+import { fmtClock, fmtLap, fmtPace, isAutoType, isRelayType, kmPaceToLapMs } from '../lib/race-data'
 import { computeLapExpectedMs, computeTeamDelta, deltaToneColor, formatSignedDuration, getDeltaTone } from '../lib/race-calculations'
 
 interface Runner {
@@ -89,8 +89,6 @@ export function HistoryScreen({
   onDeleteLap,
   onEditLapRunner,
   onUpdateLap,
-  minLapSec = 165,
-  maxLapSec = 480,
   relayTransitionSec = 5,
   lapDistanceM = 900,
 }: HistoryScreenProps) {

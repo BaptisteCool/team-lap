@@ -129,9 +129,7 @@ export function LiveScreen({
   minLapSec = 165,
   maxLapSec = 480,
   relayTransitionSec = 5,
-  scheduledEnd,
   teamFinishedAt,
-  onRecordTeamFinish,
   pushToast,
   lapDistanceM = 900,
 }: LiveScreenProps) {
