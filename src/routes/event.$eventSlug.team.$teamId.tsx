@@ -539,6 +539,7 @@ function EventTeamPage() {
             runners={runners}
             setRunners={setRunnersPersist}
             onContinue={() => setActiveTab('planning')}
+            lapDistanceM={(event as any)?.lapDistance ?? 900}
             minLapSec={(event as any)?.minLapSec ?? 5}
             maxLapSec={(event as any)?.maxLapSec ?? 3600}
             maxRunnersPerTeam={(event as any)?.maxRunnersPerTeam ?? 10}
@@ -666,6 +667,7 @@ function EventTeamPage() {
                 console.error('set currentIdx:', err),
               )
             }}
+            lapDistanceM={(event as any)?.lapDistance ?? 900}
             replaceAutoWindowSec={(event as any)?.replaceAutoWindowSec ?? 180}
             minLapSec={(event as any)?.minLapSec ?? 5}
             relayTransitionSec={(event as any)?.relayTransitionSec ?? 5}

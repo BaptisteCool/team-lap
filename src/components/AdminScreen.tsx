@@ -95,6 +95,9 @@ interface AdminScreenProps {
   // End race (admin) — sets event.actualEnd + status='finished'
   actualEnd?: number | null
   onEndRace?: () => Promise<void> | void
+  // Lap distance in meters (circuit length). Required for pace / distance calculations.
+  lapDistance?: number
+  onSetLapDistance?: (meters: number) => Promise<void> | void
 }
 
 export function AdminScreen({
@@ -135,6 +138,8 @@ export function AdminScreen({
   testModeLockReason,
   actualEnd,
   onEndRace,
+  lapDistance,
+  onSetLapDistance,
 }: AdminScreenProps) {
   const evRelayTransition = relayTransitionSec ?? 5
   const evChronoplaceEventId = chronoplaceEventId ?? ''
@@ -149,6 +154,16 @@ export function AdminScreen({
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [])
+
+  const [lapDistanceInput, setLapDistanceInput] = useState<string>(String(lapDistance ?? 900))
+  const [lapDistanceSaving, setLapDistanceSaving] = useState(false)
+  useEffect(() => {
+    setLapDistanceInput(String(lapDistance ?? 900))
+  }, [lapDistance])
+  const lapDistanceParsed = Math.floor(Number(lapDistanceInput))
+  const lapDistanceValid = Number.isFinite(lapDistanceParsed) && lapDistanceParsed > 0
+  const firstLapDistanceM = (admin as any).firstLapDistanceM ?? lapDistance ?? 900
+  const lapDistanceConflict = lapDistanceValid && firstLapDistanceM >= lapDistanceParsed
 
   // Admin password change
   const [pwNew, setPwNew] = useState('')
@@ -623,6 +638,62 @@ export function AdminScreen({
                   <div className="stat-label">Tours validés</div>
                   <div className="stat-value mono">{totalLaps}</div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Lap distance — circuit length in meters */}
+          <div className="card">
+            <div className="card-head">
+              <span>📐</span>
+              <h3>Circuit</h3>
+            </div>
+            <div className="card-body grid" style={{ gap: 10 }}>
+              <div className="hint">
+                Mesurée sur le terrain ou via Strava/Garmin
+              </div>
+              {race.started && (
+                <div className="hint" style={{ color: 'var(--warn)' }}>
+                  Modifier la distance pendant la course peut impacter les calculs en cours
+                </div>
+              )}
+              {lapDistanceConflict && (
+                <div className="hint" style={{ color: 'var(--warn)' }}>
+                  La distance du 1er tour ({firstLapDistanceM} m) doit être inférieure à la distance du circuit
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                <div className="field" style={{ maxWidth: 260 }}>
+                  <span className="field-label">Distance du circuit (m)</span>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    className="mono"
+                    value={lapDistanceInput}
+                    onChange={e => setLapDistanceInput(e.target.value)}
+                    style={{ textAlign: 'center' }}
+                  />
+                </div>
+                <button
+                  className="btn"
+                  disabled={!lapDistanceValid || lapDistanceSaving || lapDistanceParsed === (lapDistance ?? 900)}
+                  onClick={async () => {
+                    if (!lapDistanceValid || !onSetLapDistance) return
+                    setLapDistanceSaving(true)
+                    try {
+                      await onSetLapDistance(lapDistanceParsed)
+                      pushToast('Distance du circuit mise à jour', 'Check')
+                    } catch (e: any) {
+                      pushToast(e?.message || 'Erreur', 'AlertTriangle')
+                    } finally {
+                      setLapDistanceSaving(false)
+                    }
+                  }}
+                  style={{ marginBottom: 2 }}
+                >
+                  {lapDistanceSaving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
               </div>
             </div>
           </div>

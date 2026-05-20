@@ -9,7 +9,6 @@ import {
   isRelayType,
   kmPaceToLapMs,
   lapMsToKmPace,
-  LAP_DISTANCE_M,
   nextActiveIdx,
 } from '../lib/race-data'
 import { Avatar } from './Avatar'
@@ -105,6 +104,7 @@ interface LiveScreenProps {
   teamFinishedAt?: number | null
   onRecordTeamFinish?: () => void | Promise<void>
   pushToast?: (text: string, icon?: string, action?: { label: string; fn: () => void }) => void
+  lapDistanceM?: number
 }
 
 export function LiveScreen({
@@ -133,6 +133,7 @@ export function LiveScreen({
   teamFinishedAt,
   onRecordTeamFinish,
   pushToast,
+  lapDistanceM = 900,
 }: LiveScreenProps) {
   const [nowReal, setNowReal] = useState(Date.now())
   const [pausedAtMs, setPausedAtMs] = useState<number | null>(null)
@@ -202,7 +203,7 @@ export function LiveScreen({
   const realLaps = race.laps.filter(l => l.type !== 'position')
   const dbTotalLaps = realLaps.length
   const realAvgMs = dbTotalLaps ? realLaps.reduce((a, l) => a + l.lapTime, 0) / dbTotalLaps : 0
-  const totalDistanceM = dbTotalLaps * LAP_DISTANCE_M
+  const totalDistanceM = dbTotalLaps * lapDistanceM
   const projTotalLaps = dbTotalLaps
   // While the last lap is AUTO and within the admin replace window, treat it as tentative —
   // buttons + display should keep the values they had BEFORE the auto fired, so a late runner
@@ -512,7 +513,7 @@ export function LiveScreen({
                       if (label === 'cible' && lastLapInRelay) {
                         const isAutoLap = lastLapInRelay.type === 'checkpoint_auto' || lastLapInRelay.type === 'relay_auto'
                         label = isAutoLap ? 'auto' : 'manuel'
-                        const k = lapMsToKmPace(lastLapInRelay.lapTime)
+                        const k = lapMsToKmPace(lastLapInRelay.lapTime, lapDistanceM)
                         km = { min: k.min, sec: k.sec }
                       }
                       return (
@@ -656,16 +657,16 @@ export function LiveScreen({
                     <div className="rs">
                       <div className="rs-l">Dernier tour</div>
                       <div className="rs-v mono">{lastLap ? fmtLap(lastLap.lapTime) : '—'}</div>
-                      <div className="rs-s mono">{lastLap ? fmtPace(lastLap.lapTime) : '—'}</div>
+                      <div className="rs-s mono">{lastLap ? fmtPace(lastLap.lapTime, lapDistanceM) : '—'}</div>
                     </div>
                     <div className="rs">
                       <div className="rs-l">Moy. tour</div>
                       <div className="rs-v mono">{avgMs ? fmtLap(avgMs) : '—'}</div>
-                      <div className="rs-s mono">{avgMs ? fmtPace(avgMs) : '—'}</div>
+                      <div className="rs-s mono">{avgMs ? fmtPace(avgMs, lapDistanceM) : '—'}</div>
                     </div>
                     <div className="rs">
                       <div className="rs-l">Allure /km moy.</div>
-                      <div className="rs-v mono">{avgMs ? fmtPace(avgMs) : '—'}</div>
+                      <div className="rs-v mono">{avgMs ? fmtPace(avgMs, lapDistanceM) : '—'}</div>
                       <div className="rs-s">sur ce relais</div>
                     </div>
                   </div>
@@ -755,7 +756,7 @@ export function LiveScreen({
                             >
                               {fmtLap(l.lapTime)}
                             </button>
-                            <span className="rl-p mono">{fmtPace(l.lapTime)}</span>
+                            <span className="rl-p mono">{fmtPace(l.lapTime, lapDistanceM)}</span>
                             {abnormal && <span className="rl-flag">⚠️</span>}
                             {l.lapTime < minLapSec * 1000 && (
                               <button
@@ -991,12 +992,13 @@ export function LiveScreen({
             <div className="card-head">
               <span>🗺️</span>
               <h3>Circuit</h3>
-              <span className="badge" style={{ marginLeft: 'auto' }}>{LAP_DISTANCE_M} m</span>
+              <span className="badge" style={{ marginLeft: 'auto' }}>{lapDistanceM} m</span>
             </div>
             <div className="card-body" style={{ paddingTop: 10 }}>
               <div className="live-map">
                 <GpxMap
                   showLabel={false}
+                  lapDistanceM={lapDistanceM}
                   markerColor={team?.color}
                   markerLabel={team?.name}
                   markerSubLabel={(() => {
@@ -1037,7 +1039,7 @@ export function LiveScreen({
                 </div>
                 <div className="stat" style={{ minWidth: 0 }}>
                   <div className="stat-label">Allure équipe</div>
-                  <div className="stat-value mono" style={{ fontSize: 18 }}>{realAvgMs ? fmtPace(realAvgMs) : '—'}</div>
+                  <div className="stat-value mono" style={{ fontSize: 18 }}>{realAvgMs ? fmtPace(realAvgMs, lapDistanceM) : '—'}</div>
                 </div>
               </div>
             </div>
@@ -1178,6 +1180,7 @@ export function LiveScreen({
           currentIdx={race.currentIdx}
           onClose={() => setPickerOpen(null)}
           pushToast={pushToast}
+          lapDistanceM={lapDistanceM}
         />
       )}
 
@@ -1433,6 +1436,7 @@ function ManageRunnersModal({
   currentIdx,
   onClose,
   pushToast,
+  lapDistanceM,
 }: {
   runners: Runner[]
   setRunners: React.Dispatch<React.SetStateAction<Runner[]>>
@@ -1441,6 +1445,7 @@ function ManageRunnersModal({
   currentIdx: number
   onClose: () => void
   pushToast?: (text: string, icon?: string) => void
+  lapDistanceM: number
 }) {
   function update(id: string, patch: Partial<Runner>) {
     setRunners((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)))
@@ -1448,7 +1453,7 @@ function ManageRunnersModal({
   function applyLiveAuto(id: string) {
     const r = runners.find((x) => x.id === id)
     if (!r) return
-    const p = getRunnerPace(r, race)
+    const p = getRunnerPace(r, race, lapDistanceM)
     if (p.source === 'live') {
       update(id, { liveKmMin: p.kmMin, liveKmSec: p.kmSec })
       pushToast && pushToast(`${r.name} → allure verrouillée à ${fmtKmPace(p.kmMin, p.kmSec)}`, 'Lock')
@@ -1474,7 +1479,7 @@ function ManageRunnersModal({
           const idx = order.indexOf(id)
           const r = runners.find((x) => x.id === id)
           if (!r) return null
-          const p = getRunnerPace(r, race)
+          const p = getRunnerPace(r, race, lapDistanceM)
           const isCurrent = idx === currentIdx
           const hasOverride = r.liveKmMin != null && r.liveKmSec != null
           return (
@@ -1506,7 +1511,7 @@ function ManageRunnersModal({
                   </div>
                   <div>
                     <div className="lab">Auto (live)</div>
-                    <div className="val live">{p.actualLapMs ? (() => { const k = lapMsToKmPace(p.actualLapMs); return fmtKmPace(k.min, k.sec) })() : '—'}</div>
+                    <div className="val live">{p.actualLapMs ? (() => { const k = lapMsToKmPace(p.actualLapMs, lapDistanceM); return fmtKmPace(k.min, k.sec) })() : '—'}</div>
                   </div>
                   <div>
                     <div className="lab">Override</div>

@@ -63,6 +63,7 @@ interface HistoryScreenProps {
   maxLapSec?: number
   // Relay transition penalty (sec, default 7) — applied to expected times for relay laps
   relayTransitionSec?: number
+  lapDistanceM?: number
 }
 
 const LAP_PAGE_STEP = 10
@@ -91,6 +92,7 @@ export function HistoryScreen({
   minLapSec = 165,
   maxLapSec = 480,
   relayTransitionSec = 5,
+  lapDistanceM = 900,
 }: HistoryScreenProps) {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
   const [formMode, setFormMode] = useState<null | { kind: 'edit'; lap: Lap }>(null)
@@ -548,7 +550,7 @@ export function HistoryScreen({
                       style={{ display: 'flex', gap: 12, alignItems: 'baseline', cursor: 'pointer' }}
                     >
                       <span className="lap-val-time time mono" data-kind="time">{fmtLap(l.lapTime)}</span>
-                      <span className="lap-val-pace pace mono" data-kind="pace">{fmtPace(l.lapTime)}</span>
+                      <span className="lap-val-pace pace mono" data-kind="pace">{fmtPace(l.lapTime, lapDistanceM)}</span>
                       <span className="lap-val-paris mono" data-kind="paris" style={{ fontSize: 12, color: 'var(--text-2)' }}>🕒 {fmtParisHMS(l.timestamp)}</span>
                       <span className="lap-val-race mono" data-kind="race" style={{ fontSize: 12, color: 'var(--muted)' }}>T+{fmtRaceTime(l.timestamp)}</span>
                       {lapDelta != null ? (

@@ -1,7 +1,7 @@
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery } from '../convex/hooks'
-import { fmtClock, fmtKmPace, kmPaceToLapMs, LAP_DISTANCE_M, TEAM_COLOR_PALETTE } from '../lib/race-data'
+import { fmtClock, fmtKmPace, kmPaceToLapMs, TEAM_COLOR_PALETTE } from '../lib/race-data'
 import { GpxMap } from './GpxMap'
 import { TestModeBadge } from './TestModeBadge'
 
@@ -294,13 +294,13 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
           <div className="card-head">
             <span>🗺️</span>
             <h3>Circuit · live</h3>
-            <span className="badge" style={{ marginLeft: 'auto' }}>{LAP_DISTANCE_M} m / tour</span>
+            <span className="badge" style={{ marginLeft: 'auto' }}>{(event as any)?.lapDistance ?? 900} m / tour</span>
             <span className={`badge ${raceStarted ? 'accent' : ''}`}>
               {raceStarted ? `LIVE · ${fmtClock(elapsedMs)}` : 'Course non démarrée'}
             </span>
           </div>
           <div className="card-body">
-            <GpxMap height={420} markers={markers} showLabel />
+            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} />
           </div>
         </div>
 

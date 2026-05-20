@@ -57,6 +57,7 @@ interface PlanningScreenProps {
   theoreticalCycleMs?: number | null
   // Viewer mode public — masque ordre des relais, cycle complet, groupes, boutons retour/continuer
   readonly?: boolean
+  lapDistanceM?: number
 }
 
 export function PlanningScreen({
@@ -84,6 +85,7 @@ export function PlanningScreen({
   weatherCityName,
   theoreticalCycleMs,
   readonly = false,
+  lapDistanceM = 900,
 }: PlanningScreenProps) {
   // Helper: pick hourly index closest to a target ms epoch.
   function weatherIndexForTime(target: number): number | null {
@@ -824,7 +826,7 @@ export function PlanningScreen({
                             // Current runner: derive pace from his EFFECTIVE lap time (live/manual override),
                             // consistent with the ETA above. Fallback to target if expectedLapMs missing/zero.
                             if (r.id === currentRunnerId && currentRunnerExpectedLapMs && currentRunnerExpectedLapMs > 0) {
-                              const p = lapMsToKmPace(currentRunnerExpectedLapMs)
+                              const p = lapMsToKmPace(currentRunnerExpectedLapMs, lapDistanceM)
                               if (p && (p.min > 0 || p.sec > 0)) return fmtKmPace(p.min, p.sec)
                             }
                             return fmtKmPace(r.kmMin, r.kmSec)
