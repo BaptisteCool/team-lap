@@ -150,6 +150,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
       const evTestMode = (event as any)?.testMode === true
       const evTestDivider = (event as any)?.testModeDivider || 3
       const compress = evTestMode && evTestDivider > 0 ? evTestDivider : 1
+      const lapDistHome = (event as any)?.lapDistance || 900
       const expectedLapMs = (() => {
         // Priorité 0: nextExpectedLapMs (API connue à l'avance pour le tour en cours)
         const peek = (t as any).nextExpectedLapMs
@@ -161,20 +162,19 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
         }
         // No lap yet — fallback static, compressed in test mode pour matcher cadence mock
         let baseMs: number
-        if (!dbCurrent) baseMs = kmPaceToLapMs(6, 0)
+        if (!dbCurrent) baseMs = kmPaceToLapMs(6, 0, lapDistHome)
         else if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
-          const liveLapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec)
+          const liveLapMs = kmPaceToLapMs(dbCurrent.liveKmMin, dbCurrent.liveKmSec, lapDistHome)
           baseMs = liveLapMs >= minLapMsHome && liveLapMs <= maxLapMsHome
             ? liveLapMs
-            : kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
+            : kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec, lapDistHome)
         } else {
-          baseMs = kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec)
+          baseMs = kmPaceToLapMs(dbCurrent.kmMin, dbCurrent.kmSec, lapDistHome)
         }
         return baseMs / compress
       })()
       // Start-line offset: si firstLapDistanceM < lapDistance, le marker démarre
       // à (lapDist - firstLap)/lapDist du chrono (la ligne de départ est en amont du chrono).
-      const lapDistHome = (event as any)?.lapDistance || 900
       const firstLapDistHome = (event as any)?.firstLapDistanceM || lapDistHome
       const startOffset = firstLapDistHome > 0 && firstLapDistHome < lapDistHome
         ? (lapDistHome - firstLapDistHome) / lapDistHome
@@ -338,7 +338,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
                   const pace = current
                     ? (() => {
                         if (current.liveKmMin != null && current.liveKmSec != null) {
-                          const lapMs = kmPaceToLapMs(current.liveKmMin, current.liveKmSec)
+                          const lapMs = kmPaceToLapMs(current.liveKmMin, current.liveKmSec, (event as any)?.lapDistance || 900)
                           const minMs = (event?.minLapSec ?? 5) * 1000
                           const maxMs = (event?.maxLapSec ?? 3600) * 1000
                           if (lapMs >= minMs && lapMs <= maxMs) return fmtKmPace(current.liveKmMin, current.liveKmSec)

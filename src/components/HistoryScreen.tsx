@@ -450,7 +450,7 @@ export function HistoryScreen({
                   )
                 }
                 const r = getRunner(l.runnerId)
-                const expectedMs = r ? kmPaceToLapMs(r.kmMin, r.kmSec) : 0
+                const expectedMs = r ? kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM) : 0
                 const isAbnormal = expectedMs > 0 && l.lapTime > expectedMs * 2
                 const badge = TYPE_BADGE[l.type] || TYPE_BADGE.checkpoint_manual
                 const plusMinus = lapBadge[l._id || l.id]

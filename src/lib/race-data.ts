@@ -29,7 +29,7 @@ export function fmtPace(ms: number, distM: number): string {
 }
 
 // Convert km pace (min/km) to lap time in milliseconds
-export function kmPaceToLapMs(kmMin: number, kmSec: number, lapDistanceM = 900): number {
+export function kmPaceToLapMs(kmMin: number, kmSec: number, lapDistanceM: number): number {
   const paceSeconds = kmMin * 60 + kmSec
   const lapSeconds = (paceSeconds * lapDistanceM) / 1000
   return Math.round(lapSeconds * 1000)
@@ -91,28 +91,29 @@ export function computeTeamProgress(
   raceStarted: boolean,
   raceStartTime: number | null,
   now: number,
-  kmPaceToLapMsFn: typeof kmPaceToLapMs
+  kmPaceToLapMsFn: typeof kmPaceToLapMs,
+  lapDistanceM: number = 900,
 ): number {
   if (!raceStarted || !raceStartTime) return 0
   const laps = team.laps || []
   const order = team.order || []
   const runners = team.runners || []
   if (order.length === 0) return 0
-  
+
   const lastLapAt = laps.length ? laps[laps.length - 1].timestamp : raceStartTime
   const currentRunnerId = order[(team.currentIdx || 0) % order.length]
   const runner = runners.find((r: any) => r.id === currentRunnerId)
   if (!runner) return 0
-  
+
   const lastLap = laps.length ? laps[laps.length - 1] : null
   let expectedLapMs: number
-  
+
   if (runner.liveKmMin != null) {
-    expectedLapMs = kmPaceToLapMsFn(runner.liveKmMin, runner.liveKmSec)
+    expectedLapMs = kmPaceToLapMsFn(runner.liveKmMin, runner.liveKmSec, lapDistanceM)
   } else if (lastLap && lastLap.runnerId === runner.id) {
     expectedLapMs = lastLap.lapTime
   } else {
-    expectedLapMs = kmPaceToLapMsFn(runner.kmMin, runner.kmSec)
+    expectedLapMs = kmPaceToLapMsFn(runner.kmMin, runner.kmSec, lapDistanceM)
   }
   
   if (!expectedLapMs || expectedLapMs <= 0) return 0
@@ -211,6 +212,7 @@ export function estimateGoalLaps(
   runners: Array<{ id: string; kmMin: number; kmSec: number; plannedLaps?: number; status?: string }>,
   order: string[],
   raceDurationMs: number = 24 * 3600 * 1000,
+  lapDistanceM: number = 900,
 ): number {
   const activeOrder = order.filter((id) => {
     const r = runners.find((x) => x.id === id)
@@ -223,7 +225,7 @@ export function estimateGoalLaps(
     const r = runners.find((x) => x.id === id)
     if (!r) continue
     const planned = Math.max(1, r.plannedLaps || 1)
-    const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+    const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM)
     cycleMs += lapMs * planned
     lapsPerCycle += planned
   }

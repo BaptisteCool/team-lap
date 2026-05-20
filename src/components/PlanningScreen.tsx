@@ -268,7 +268,7 @@ export function PlanningScreen({
     }
   }
 
-  const totalMs = expandedSequence.reduce((a, s) => a + kmPaceToLapMs(s.runner.kmMin, s.runner.kmSec), 0)
+  const totalMs = expandedSequence.reduce((a, s) => a + kmPaceToLapMs(s.runner.kmMin, s.runner.kmSec, lapDistanceM), 0)
 
   // Helper functions
   function fmtLap(ms: number): string {
@@ -301,7 +301,7 @@ export function PlanningScreen({
               {order.map((id, idx) => {
                 const r = getRunner(id)
                 if (!r) return null
-                const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+                const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM)
                 const isOut = r.status === 'out'
                 return (
                   <div
@@ -720,7 +720,7 @@ export function PlanningScreen({
                         firstCurrentSeen = true
                       }
                     } else {
-                      lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+                      lapMs = kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM)
                     }
                     cum += lapMs
                     return { s, eta: new Date(startMs + cum), originalIdx: i }

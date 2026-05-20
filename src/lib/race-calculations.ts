@@ -23,9 +23,10 @@ export function computeLapExpectedMs(
   lap: LapLike,
   runner: RunnerLike | undefined,
   relayTransitionSec: number,
+  lapDistanceM: number = 900,
 ): number | null {
   if (!runner) return null
-  const baseMs = kmPaceToLapMs(runner.kmMin, runner.kmSec)
+  const baseMs = kmPaceToLapMs(runner.kmMin, runner.kmSec, lapDistanceM)
   const isRelay = lap.type === 'relay_manual' || lap.type === 'relay_auto'
   return isRelay ? baseMs + relayTransitionSec * 1000 : baseMs
 }

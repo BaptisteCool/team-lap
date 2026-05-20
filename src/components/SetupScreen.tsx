@@ -115,7 +115,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
 
   // Team stats — only count active (non-out) runners
   const active = runners.filter(r => r.status !== 'out')
-  const totalLapMs = active.reduce((acc, r) => acc + kmPaceToLapMs(r.kmMin, r.kmSec), 0)
+  const totalLapMs = active.reduce((acc, r) => acc + kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM), 0)
   const avgLapMs = active.length ? totalLapMs / active.length : 0
   const projectedLaps = avgLapMs ? Math.floor((24 * 3600 * 1000) / avgLapMs) : 0
   const projectedKm = ((projectedLaps * lapDistanceM) / 1000).toFixed(1)
@@ -370,7 +370,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
             )}
             <div className="grid" style={{ gap: 10 }}>
               {runners.map(r => {
-                const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec)
+                const lapMs = kmPaceToLapMs(r.kmMin, r.kmSec, lapDistanceM)
                 return (
                   <div
                     key={r.id}
@@ -551,7 +551,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
       </div>
 
       {addRunnerOpen && (() => {
-        const lapMs = kmPaceToLapMs(addPaceMin, addPaceSec)
+        const lapMs = kmPaceToLapMs(addPaceMin, addPaceSec, lapDistanceM)
         const minMs = minLapSec * 1000
         const maxMs = maxLapSec * 1000
         const paceValid = lapMs >= minMs && lapMs <= maxMs
@@ -659,7 +659,7 @@ export function SetupScreen({ team, setTeam, runners, setRunners, onContinue, mi
       })()}
 
       {editPaceFor && (() => {
-        const lapMs = kmPaceToLapMs(editPaceFor.min, editPaceFor.sec)
+        const lapMs = kmPaceToLapMs(editPaceFor.min, editPaceFor.sec, lapDistanceM)
         const minMs = minLapSec * 1000
         const maxMs = maxLapSec * 1000
         const valid = lapMs >= minMs && lapMs <= maxMs

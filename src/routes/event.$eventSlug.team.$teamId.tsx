@@ -420,7 +420,7 @@ function EventTeamPage() {
     if (!teamData?._id) return
     if (!runners || runners.length === 0) return
     const raceDur = event?.raceDuration || 24 * 3600 * 1000
-    const estimate = estimateGoalLaps(runners as any, order, raceDur)
+    const estimate = estimateGoalLaps(runners as any, order, raceDur, (event as any)?.lapDistance || 900)
     if (estimate > 0 && estimate !== teamData.goalLaps) {
       updateTeamMutation({ teamId: teamData._id, updates: { goalLaps: estimate } }).catch((err: any) =>
         console.error('auto goalLaps update:', err),
