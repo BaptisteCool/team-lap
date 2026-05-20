@@ -12,10 +12,17 @@ export function PinPrompt({ onSuccess }: PinPromptProps) {
   const [locked, setLocked] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus()
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
   }, [])
 
@@ -40,10 +47,12 @@ export function PinPrompt({ onSuccess }: PinPromptProps) {
         setError('PIN invalide')
         if (newAttempts >= 3) {
           setLocked(true)
-          setTimeout(() => {
+          if (timeoutRef.current) clearTimeout(timeoutRef.current)
+          timeoutRef.current = setTimeout(() => {
             setLocked(false)
             setAttempts(0)
             setError(null)
+            timeoutRef.current = null
           }, 5000)
         }
       }
@@ -56,10 +65,12 @@ export function PinPrompt({ onSuccess }: PinPromptProps) {
         setError('PIN invalide')
         if (newAttempts >= 3) {
           setLocked(true)
-          setTimeout(() => {
+          if (timeoutRef.current) clearTimeout(timeoutRef.current)
+          timeoutRef.current = setTimeout(() => {
             setLocked(false)
             setAttempts(0)
             setError(null)
+            timeoutRef.current = null
           }, 5000)
         }
       }
@@ -77,8 +88,9 @@ export function PinPrompt({ onSuccess }: PinPromptProps) {
         </div>
         <div className="card-body grid" style={{ gap: 14 }}>
           <div className="field">
-            <span className="field-label">Code PIN</span>
+            <label htmlFor="pin-input" className="field-label">Code PIN</label>
             <input
+              id="pin-input"
               ref={inputRef}
               type="password"
               inputMode="numeric"
@@ -98,7 +110,7 @@ export function PinPrompt({ onSuccess }: PinPromptProps) {
               disabled={locked || submitting}
             />
             {error && (
-              <span className="hint" style={{ color: 'var(--danger)' }}>
+              <span className="hint" aria-live="polite" style={{ color: 'var(--danger)' }}>
                 {error}
               </span>
             )}
