@@ -21,7 +21,7 @@ export function Modal({ title, icon, onClose, children, footer }: ModalProps) {
         <div className="modal-head">
           {icon && <span style={{ fontSize: 18 }}>{icon}</span>}
           <h3>{title}</h3>
-          <button className="btn ghost icon" style={{ marginLeft: 'auto' }} onClick={onClose}>
+          <button className="btn ghost icon" style={{ marginLeft: 'auto' }} onClick={onClose} aria-label="Fermer">
             ✕
           </button>
         </div>
