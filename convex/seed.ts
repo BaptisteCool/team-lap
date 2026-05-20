@@ -1,5 +1,8 @@
 import { v } from 'convex/values'
 import { mutation, query } from './_generated/server'
+import { createEventWithDefaults } from './lib/eventHelpers'
+
+// ─── Seed mutations ───────────────────────────────────────────────────────────
 
 // Create a demo organization
 export const createDemoOrganization = mutation({
@@ -18,21 +21,17 @@ export const createDemoOrganization = mutation({
 export const createDemoEvent = mutation({
   args: { organizationId: v.id('organizations') },
   handler: async (ctx, args) => {
-    const eventId = await ctx.db.insert('events', {
+    return await createEventWithDefaults(ctx, {
       organizationId: args.organizationId,
       name: '24h de Brette-les-Pins 2026',
       slug: '24h-brette-les-pins-2026',
       scheduledStart: new Date('2026-05-16T14:00:00+02:00').getTime(),
       scheduledEnd: new Date('2026-05-17T14:00:00+02:00').getTime(),
-      status: 'scheduled',
       lapDistance: 900,
       raceDuration: 24 * 3600 * 1000,
       adminPassword: 'azerty2026',
       superAdminPin: '080687',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
     })
-    return eventId
   },
 })
 
@@ -225,17 +224,18 @@ export const seedAll = mutation({
       createdAt: Date.now(),
     })
 
-    const eventId = await ctx.db.insert('events', {
+    const eventId = await createEventWithDefaults(ctx, {
       organizationId: orgId,
       name: '24h Running 2026 (mock)',
       slug,
       scheduledStart: new Date('2026-05-16T14:00:00+02:00').getTime(),
       scheduledEnd: new Date('2026-05-17T14:00:00+02:00').getTime(),
-      status: 'scheduled',
       lapDistance: 900,
       raceDuration: 24 * 3600 * 1000,
       adminPassword: 'azerty2026',
       superAdminPin: '080687',
+    })
+    await ctx.db.patch(eventId, {
       chronoplaceEventId: 225,
       testMode: true,
       relayTransitionSec: 5,
@@ -246,7 +246,6 @@ export const seedAll = mutation({
       firstLapDistanceM: 800,
       chronoplaceClassementUrl: 'https://www.chronoplace.fr/classement/24h-running-2026/epreuve/552',
       organizerUrl: 'https://fr.milesrepublic.com/event/24h-running-15149',
-      createdAt: Date.now(),
       updatedAt: Date.now(),
     })
 

@@ -2,6 +2,7 @@ import { ConvexError, v } from 'convex/values'
 import { mutation, query } from './_generated/server'
 import { internal } from './_generated/api'
 import { TEST_MODE_LOCK_WINDOW_MS } from './lib/timings'
+import { createEventWithDefaults } from './lib/eventHelpers'
 
 // List all events
 export const list = query({
@@ -525,5 +526,59 @@ export const getInterruptions = query({
       .query('interruptions')
       .withIndex('by_event', (q) => q.eq('eventId', args.eventId))
       .collect()
+  },
+})
+
+// ─── Super-admin: create a new event ─────────────────────────────────────────
+// Protected by SUPER_ADMIN_PIN Convex env var (set via: npx convex env set SUPER_ADMIN_PIN <value>).
+// process.env is accessible in Convex mutations/queries (V8 runtime).
+export const create = mutation({
+  args: {
+    name: v.string(),
+    slug: v.string(),
+    scheduledStart: v.number(),
+    scheduledEnd: v.number(),
+    organizationId: v.optional(v.id('organizations')),
+    superAdminPin: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const expected = process.env.SUPER_ADMIN_PIN
+    if (!expected) throw new ConvexError('PIN_NOT_CONFIGURED')
+    if (args.superAdminPin !== expected) throw new ConvexError('Unauthorized')
+
+    const name = args.name.trim()
+    if (!name) throw new ConvexError('Name required')
+    if (!/^[a-z0-9-]+$/.test(args.slug)) throw new ConvexError('Slug invalid format')
+    if (args.scheduledEnd <= args.scheduledStart) {
+      throw new ConvexError('scheduledEnd must be > scheduledStart')
+    }
+
+    const existing = await ctx.db
+      .query('events')
+      .withIndex('by_slug', (q) => q.eq('slug', args.slug))
+      .unique()
+    if (existing) throw new ConvexError('SLUG_CONFLICT')
+
+    let organizationId = args.organizationId
+    if (!organizationId) {
+      const orgs = await ctx.db.query('organizations').take(2)
+      if (orgs.length === 0) {
+        throw new ConvexError('No organization configured')
+      } else if (orgs.length === 1) {
+        organizationId = orgs[0]._id
+      } else {
+        throw new ConvexError('organizationId required (multiple orgs)')
+      }
+    }
+
+    const eventId = await createEventWithDefaults(ctx, {
+      name,
+      slug: args.slug,
+      scheduledStart: args.scheduledStart,
+      scheduledEnd: args.scheduledEnd,
+      organizationId,
+    })
+
+    return { _id: eventId, slug: args.slug }
   },
 })
