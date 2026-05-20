@@ -13,8 +13,6 @@ import { getMockRunnerForLap, getMockStintLengthForLap, isMockRelayLap } from '.
 
 // Min lap gap floor — also used to guard pace calibration against double-tap garbage.
 const MIN_LAP_GAP_MS = 5000
-// Lap loop length in meters (matches client + laps.ts).
-const LAP_DISTANCE_M = 900
 
 // Burst polling tuning. The auto chain is started at the theoretical next-lap time;
 // the manual chain is started immediately on user click. In test mode, `maxAttempts`
@@ -38,14 +36,14 @@ function maxAttemptsForBurst(type: 'manual' | 'auto', divider: number): number {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
-function kmPaceFromLapMs(lapMs: number, distanceM: number = LAP_DISTANCE_M): { min: number; sec: number } {
+function kmPaceFromLapMs(lapMs: number, distanceM: number): { min: number; sec: number } {
   const secPerKm = (lapMs / 1000) * (1000 / distanceM)
   const min = Math.floor(secPerKm / 60)
   const sec = Math.round(secPerKm - min * 60)
   return { min, sec }
 }
 
-function kmPaceToLapMs(min: number, sec: number, distanceM: number = LAP_DISTANCE_M): number {
+function kmPaceToLapMs(min: number, sec: number, distanceM: number): number {
   const paceSec = min * 60 + sec
   return Math.round((paceSec * distanceM) / 1000) * 1000
 }
@@ -327,11 +325,12 @@ export const applyChronoplaceLap = internalMutation({
     if (lapTimeMs >= MIN_LAP_GAP_MS && runnerForLap) {
       const event = await ctx.db.get(team.eventId)
       const tApply = getEffectiveTimings(event)
+      const lapDistanceM = (event as any)?.lapDistance ?? 900
       const realLapMs = tApply.testMode ? lapTimeMs * tApply.testModeDivider : lapTimeMs
       if (isRelay) {
-        const relayPace = kmPaceFromLapMs(realLapMs)
+        const relayPace = kmPaceFromLapMs(realLapMs, lapDistanceM)
         const stripped = Math.max(MIN_LAP_GAP_MS, realLapMs - tApply.relayTransitionSec * 1000)
-        const livePace = kmPaceFromLapMs(stripped)
+        const livePace = kmPaceFromLapMs(stripped, lapDistanceM)
         await ctx.db.patch(runnerForLap._id, {
           theoreticalRelayPaceMin: relayPace.min,
           theoreticalRelayPaceSec: relayPace.sec,
@@ -339,7 +338,7 @@ export const applyChronoplaceLap = internalMutation({
           liveKmSec: livePace.sec,
         } as any)
       } else {
-        const livePace = kmPaceFromLapMs(realLapMs)
+        const livePace = kmPaceFromLapMs(realLapMs, lapDistanceM)
         await ctx.db.patch(runnerForLap._id, {
           liveKmMin: livePace.min,
           liveKmSec: livePace.sec,
@@ -638,9 +637,10 @@ export const scheduleNextAutoBurst = internalMutation({
     const tDecide = getEffectiveTimings(event)
     const lastLap = sortedDesc[0]
     const isFirstEverLap = !lastLap
+    const eventLapDistance = (event as any).lapDistance ?? 900
     const lapDistanceForExpected = isFirstEverLap
-      ? ((event as any).firstLapDistanceM ?? (event as any).lapDistance ?? LAP_DISTANCE_M)
-      : ((event as any).lapDistance ?? LAP_DISTANCE_M)
+      ? ((event as any).firstLapDistanceM ?? eventLapDistance)
+      : eventLapDistance
 
     // Cascade priorité expectedLapMs (mock = course déjà passée, valeurs API connues):
     //  0. mock peek direct (testMode + slug mock) — TOUJOURS calculé from raw data

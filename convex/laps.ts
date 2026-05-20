@@ -169,7 +169,7 @@ export const recordLap = mutation({
         const adjustedLapTime = args.change
           ? Math.max(MIN_LAP_GAP_MS, lapTime - relayTransitionMs)
           : lapTime
-        const lapDistanceM = 900
+        const lapDistanceM = (event as any)?.lapDistance ?? 900
         const secPerKm = (adjustedLapTime / 1000) * (1000 / lapDistanceM)
         const min = Math.floor(secPerKm / 60)
         const sec = Math.round(secPerKm - min * 60)

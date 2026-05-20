@@ -56,7 +56,6 @@ export const resolveId = query({
 
 // ─── Race control mutations ────────────────────────────────────────────────
 
-const LAP_DISTANCE_M_FALLBACK = 900
 function kmPaceToLapMsLocal(kmMin: number, kmSec: number, lapDistanceM: number): number {
   const paceSeconds = kmMin * 60 + kmSec
   const lapSeconds = (paceSeconds * lapDistanceM) / 1000
@@ -89,7 +88,7 @@ export const startRaceNow = mutation({
   args: { eventId: v.id('events') },
   handler: async (ctx, args) => {
     const event = await ctx.db.get(args.eventId)
-    const lapDistanceM = (event as any)?.lapDistance || LAP_DISTANCE_M_FALLBACK
+    const lapDistanceM = (event as any)?.lapDistance ?? 900
     await ctx.db.patch(args.eventId, {
       status: 'running',
       actualStart: Date.now(),
@@ -105,7 +104,7 @@ export const startRaceAtScheduled = mutation({
   handler: async (ctx, args) => {
     const event = await ctx.db.get(args.eventId)
     if (!event?.scheduledStart) return
-    const lapDistanceM = (event as any)?.lapDistance || LAP_DISTANCE_M_FALLBACK
+    const lapDistanceM = (event as any)?.lapDistance ?? 900
     await ctx.db.patch(args.eventId, {
       status: 'running',
       actualStart: event.scheduledStart,
@@ -427,6 +426,21 @@ export const setFirstLapDistance = mutation({
       firstLapDistanceM: m > 0 ? m : undefined,
       updatedAt: Date.now(),
     } as any)
+  },
+})
+
+export const setLapDistance = mutation({
+  args: { eventId: v.id('events'), lapDistance: v.number(), superAdminPin: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    if (args.lapDistance <= 0) {
+      throw new ConvexError('lapDistance doit être > 0')
+    }
+    const event = await ctx.db.get(args.eventId)
+    if (!event) throw new ConvexError('Event introuvable')
+    if ((event as any).firstLapDistanceM != null && (event as any).firstLapDistanceM >= args.lapDistance) {
+      throw new ConvexError('firstLapDistanceM doit être < lapDistance')
+    }
+    await ctx.db.patch(args.eventId, { lapDistance: args.lapDistance, updatedAt: Date.now() } as any)
   },
 })
 
