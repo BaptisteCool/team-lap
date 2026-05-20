@@ -1,10 +1,7 @@
 import { createRootRoute, Link, Outlet } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
-import { useMutation, useQuery } from '../convex/hooks'
-import { fmtClock } from '../lib/utils'
+import { useEffect } from 'react'
+import { useMutation } from '../convex/hooks'
 import { UpdateBanner } from '../components/UpdateBanner'
-
-const EVENT_SLUG = '24h-brette-les-pins-2026'
 
 // Env detection from hostname — distingue localhost / preview Vercel / prod
 function detectEnv(): { label: string; tag: string | null; color: string } {
@@ -45,32 +42,6 @@ export const Route = createRootRoute({
         if (themeMeta && prevTheme) themeMeta.content = prevTheme
       }
     }, [env.tag])
-    const event = useQuery('events:getBySlug' as any, { slug: EVENT_SLUG }) as any
-    const [now, setNow] = useState(Date.now())
-    useEffect(() => {
-      const id = setInterval(() => setNow(Date.now()), 1000)
-      return () => clearInterval(id)
-    }, [])
-
-    const status = event?.status as string | undefined
-    const raceStarted = status === 'running'
-    const raceFinished = status === 'finished' || event?.actualEnd
-    const racePaused = status === 'paused'
-    const raceStartTime: number | null = event?.actualStart || null
-    const RACE_MS = (event?.raceDuration as number) || 24 * 3600 * 1000
-    const scheduledStartMs = (event?.scheduledStart as number) || null
-
-    // En testMode, l'affichage timeline est "virtuel" : 1 sec de mur = N sec de course
-    // affichée (N = testModeDivider). Ça fait que LIVE écoulé + remaining s'affichent
-    // accélérés et collent au rythme des laps mock compressés.
-    const testMode = (event as any)?.testMode === true
-    const testDivider = (event as any)?.testModeDivider || 3
-    const displayMul = testMode && testDivider > 0 ? testDivider : 1
-
-    const wallElapsed = raceStartTime ? Math.max(0, now - raceStartTime) : 0
-    const elapsed = Math.min(wallElapsed * displayMul, RACE_MS)
-    const remaining = raceStartTime ? Math.max(0, RACE_MS - elapsed) : RACE_MS
-    const tilStart = scheduledStartMs ? scheduledStartMs - now : null
 
     // Client-side cron fallback — local Convex backend doesn't run scheduled crons.
     // Fires immediately on mount + every 5s on every page; server-side debounced (MIN_LAP_GAP_MS=5s).
@@ -83,7 +54,7 @@ export const Route = createRootRoute({
       }, 5000)
       return () => clearInterval(id)
     }, [autoTickMutation])
-    
+
     return (
       <div className="app">
         <header className="topbar">
@@ -119,42 +90,16 @@ export const Route = createRootRoute({
               </div>
             </Link>
           </div>
-          
+
           <div className="topbar-spacer" />
-          
+
           <Link to="/" className="btn ghost hide-on-mobile">
             Accueil
           </Link>
-          
-          <div className={`live-pill ${raceStarted ? 'is-live' : ''}`}>
+
+          <div className="live-pill">
             <span className="live-dot"></span>
-            {raceFinished ? (
-              <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span>🏁</span>
-                <span>Terminée</span>
-                {raceStartTime && <span>{fmtClock(elapsed)}</span>}
-              </span>
-            ) : racePaused && raceStartTime ? (
-              <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span>⏸</span>
-                <span>PAUSE</span>
-                <span>{fmtClock(elapsed)}</span>
-              </span>
-            ) : raceStarted && raceStartTime ? (
-              <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span>LIVE</span>
-                <span>{fmtClock(elapsed)}</span>
-                <span style={{ color: 'var(--muted)' }}>·</span>
-                <span style={{ color: 'var(--text-2)' }}>−{fmtClock(remaining)}</span>
-              </span>
-            ) : tilStart != null && tilStart > 0 ? (
-              <span className="mono" style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
-                <span>Départ dans</span>
-                <span>{fmtClock(tilStart)}</span>
-              </span>
-            ) : (
-              <span>Stand‑by</span>
-            )}
+            <span>Stand‑by</span>
           </div>
         </header>
         <main>
