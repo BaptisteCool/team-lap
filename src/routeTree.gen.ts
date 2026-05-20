@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SuperAdminRouteImport } from './routes/super-admin'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TeamTeamIdRouteImport } from './routes/team.$teamId'
@@ -17,6 +18,11 @@ import { Route as EventEventSlugIndexRouteImport } from './routes/event.$eventSl
 import { Route as EventEventSlugAdminRouteImport } from './routes/event.$eventSlug.admin'
 import { Route as EventEventSlugTeamTeamIdRouteImport } from './routes/event.$eventSlug.team.$teamId'
 
+const SuperAdminRoute = SuperAdminRouteImport.update({
+  id: '/super-admin',
+  path: '/super-admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
@@ -57,6 +63,7 @@ const EventEventSlugTeamTeamIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/super-admin': typeof SuperAdminRoute
   '/event/$eventSlug': typeof EventEventSlugRouteWithChildren
   '/team/$teamId': typeof TeamTeamIdRoute
   '/event/$eventSlug/admin': typeof EventEventSlugAdminRoute
@@ -66,6 +73,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/super-admin': typeof SuperAdminRoute
   '/team/$teamId': typeof TeamTeamIdRoute
   '/event/$eventSlug/admin': typeof EventEventSlugAdminRoute
   '/event/$eventSlug': typeof EventEventSlugIndexRoute
@@ -75,6 +83,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/super-admin': typeof SuperAdminRoute
   '/event/$eventSlug': typeof EventEventSlugRouteWithChildren
   '/team/$teamId': typeof TeamTeamIdRoute
   '/event/$eventSlug/admin': typeof EventEventSlugAdminRoute
@@ -86,6 +95,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/super-admin'
     | '/event/$eventSlug'
     | '/team/$teamId'
     | '/event/$eventSlug/admin'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin'
+    | '/super-admin'
     | '/team/$teamId'
     | '/event/$eventSlug/admin'
     | '/event/$eventSlug'
@@ -103,6 +114,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/super-admin'
     | '/event/$eventSlug'
     | '/team/$teamId'
     | '/event/$eventSlug/admin'
@@ -113,12 +125,20 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  SuperAdminRoute: typeof SuperAdminRoute
   EventEventSlugRoute: typeof EventEventSlugRouteWithChildren
   TeamTeamIdRoute: typeof TeamTeamIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/super-admin': {
+      id: '/super-admin'
+      path: '/super-admin'
+      fullPath: '/super-admin'
+      preLoaderRoute: typeof SuperAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin': {
       id: '/admin'
       path: '/admin'
@@ -190,6 +210,7 @@ const EventEventSlugRouteWithChildren = EventEventSlugRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  SuperAdminRoute: SuperAdminRoute,
   EventEventSlugRoute: EventEventSlugRouteWithChildren,
   TeamTeamIdRoute: TeamTeamIdRoute,
 }
