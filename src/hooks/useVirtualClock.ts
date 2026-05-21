@@ -12,50 +12,56 @@ export type UseVirtualClockReturn = {
   goLive: () => void
 }
 
+const LIVE_THRESHOLD_PCT = 99.5
+const TICK_MS = 250
+
 export function useVirtualClock(
   startTime: number,
   testModeDivider?: number,
   options?: UseVirtualClockOptions,
 ): UseVirtualClockReturn {
-  const [virtualNow, setRawVirtualNow] = useState<number>(() => Date.now())
-  const [isLive, setIsLive] = useState<boolean>(true)
+  // Position relative on the slider track (0..100). 100 = pinned to live edge.
+  const [sliderPct, setSliderPct] = useState<number>(100)
+  // Tick state to force re-render so derived virtualNow stays fresh.
+  const [, setTickNow] = useState<number>(() => Date.now())
   const lastUpdateRef = useRef<number>(0)
 
-  // Ignore Phase 1 unused options — kept for Phase 2 API stability
   void options
 
-  const applyTime = useCallback(
-    (t: number) => {
-      const clamped = Math.max(startTime, Math.min(Date.now(), t))
-      setRawVirtualNow(clamped)
-      setIsLive(clamped >= Date.now() - 1000)
-    },
-    [startTime],
-  )
+  // Auto-tick: re-render every TICK_MS so virtualNow derived from Date.now() stays current.
+  useEffect(() => {
+    const id = setInterval(() => setTickNow(Date.now()), TICK_MS)
+    return () => clearInterval(id)
+  }, [])
+
+  // Reset to live when testModeDivider changes (mock timestamps shift).
+  useEffect(() => {
+    lastUpdateRef.current = 0
+    setSliderPct(100)
+  }, [testModeDivider])
+
+  const nowMs = Date.now()
+  const totalMs = Math.max(1, nowMs - startTime)
+  const virtualNow = startTime + (sliderPct / 100) * totalMs
+  const isLive = sliderPct >= LIVE_THRESHOLD_PCT
 
   const goLive = useCallback(() => {
     lastUpdateRef.current = 0
-    setRawVirtualNow(Date.now())
-    setIsLive(true)
+    setSliderPct(100)
   }, [])
 
   const setVirtualNow = useCallback(
     (t: number) => {
       const now = Date.now()
-      // Throttle: max 1 update per ~16ms frame (rAF equivalent, synchronous for testability)
       if (now - lastUpdateRef.current < 16) return
       lastUpdateRef.current = now
-      applyTime(t)
+      const total = Math.max(1, now - startTime)
+      const clamped = Math.max(startTime, Math.min(now, t))
+      const pct = ((clamped - startTime) / total) * 100
+      setSliderPct(Math.max(0, Math.min(100, pct)))
     },
-    [applyTime],
+    [startTime],
   )
-
-  // Reset to live when testModeDivider changes (mock timestamps shift)
-  useEffect(() => {
-    lastUpdateRef.current = 0
-    setRawVirtualNow(Date.now())
-    setIsLive(true)
-  }, [testModeDivider])
 
   return { virtualNow, setVirtualNow, isLive, goLive }
 }
