@@ -1,5 +1,6 @@
 import { FastForward, FlaskConical, Loader2, Pause, Play, RotateCcw } from 'lucide-react'
 import React, { useMemo, useState } from 'react'
+import { TeamFilterMultiSelect } from './TeamFilterMultiSelect'
 
 export type RelayTickInput =
   | number
@@ -258,32 +259,13 @@ export function TestModeTimelapseSlider({
         </time>
 
         {teamFilterOptions && teamFilterOptions.length > 0 && onToggleTeam && (
-          <div className="time-scrubber-teams" role="group" aria-label="Filtre equipes">
-            {teamFilterOptions.map((opt) => {
-              const active = selectedTeamIds?.has(opt.id) ?? false
-              const disabled = !active && (selectedTeamIds?.size ?? 0) >= maxSelectedTeams
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  className={`team-filter-chip${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
-                  onClick={() => { if (!disabled) onToggleTeam(opt.id) }}
-                  disabled={disabled}
-                  aria-pressed={active}
-                  style={{ ['--chip-color' as any]: opt.color }}
-                  title={`${opt.name}${disabled ? ' (max 3 selectionnees)' : ''}`}
-                >
-                  <span className="team-filter-dot" />
-                  <span className="team-filter-name">{opt.name}</span>
-                </button>
-              )
-            })}
-            {(selectedTeamIds?.size ?? 0) > 0 && onClearTeams && (
-              <button type="button" className="team-filter-clear" onClick={onClearTeams}>
-                Tout
-              </button>
-            )}
-          </div>
+          <TeamFilterMultiSelect
+            options={teamFilterOptions}
+            selectedIds={selectedTeamIds ?? new Set()}
+            onToggle={onToggleTeam}
+            onClear={onClearTeams ?? (() => {})}
+            maxSelected={maxSelectedTeams}
+          />
         )}
 
         <div className="time-scrubber-zoom" role="group" aria-label="Zoom temporel">

@@ -426,15 +426,166 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   color: var(--text);
 }
 
-/* Team filter chips — inside slider top row */
-.time-scrubber-teams {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
+/* Team filter multi-select dropdown */
+.team-multiselect {
+  position: relative;
+  display: inline-block;
   margin-left: 4px;
   margin-right: 8px;
-  max-width: 100%;
+}
+.team-multiselect-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--muted);
+  background: var(--surface-3, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+.team-multiselect-trigger:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.team-multiselect-trigger.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(166,240,96,0.14));
+}
+.team-multiselect-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  min-width: 240px;
+  max-width: 320px;
+  background: var(--bg-2, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.team-multiselect-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+}
+.team-multiselect-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  min-width: 0;
+}
+.team-multiselect-search-clear {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+}
+.team-multiselect-search-clear:hover {
+  color: var(--text);
+}
+.team-multiselect-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.team-multiselect-empty {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 8px;
+  text-align: center;
+}
+.team-multiselect-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-2);
+  font-size: 12px;
+  transition: background 120ms, color 120ms;
+}
+.team-multiselect-option:hover:not(.is-disabled) {
+  background: var(--surface-3, rgba(255,255,255,0.04));
+  color: var(--text);
+}
+.team-multiselect-option.is-active {
+  color: var(--text);
+  background: color-mix(in srgb, var(--chip-color) 14%, transparent);
+  border-color: var(--chip-color);
+}
+.team-multiselect-option.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.team-multiselect-checkbox {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--chip-color);
+}
+.team-multiselect-option.is-active .team-multiselect-checkbox {
+  background: var(--chip-color);
+  border-color: var(--chip-color);
+  color: var(--bg);
+}
+.team-multiselect-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--chip-color);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.team-multiselect-name {
+  flex: 1;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+}
+.team-multiselect-clear {
+  margin-top: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.team-multiselect-clear:hover {
+  color: var(--text);
+  border-color: var(--accent);
 }
 .team-filter-chip {
   display: inline-flex;
@@ -496,13 +647,21 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
     flex-wrap: wrap;
     gap: 6px;
   }
-  .time-scrubber-teams {
+  .team-multiselect {
     order: 2;
     width: 100%;
     margin-left: 0;
     margin-right: 0;
-    overflow-x: auto;
-    flex-wrap: nowrap;
+  }
+  .team-multiselect-trigger {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .team-multiselect-panel {
+    left: 0;
+    right: 0;
+    max-width: none;
+    width: 100%;
   }
   .time-scrubber-zoom {
     order: 3;
