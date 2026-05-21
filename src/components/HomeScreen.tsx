@@ -152,15 +152,32 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
     return allLaps.filter((l: any) => l.timestamp <= virtualNow)
   }, [allLaps, testMode, virtualNow, futureLaps])
 
-  // Relay ticks: timestamps + team + incoming runner (next stint) for the slider ticks
-  const relayTicks = useMemo<Array<{ timestamp: number; teamName: string; runnerName: string }>>(() => {
+  // Team filter (max 3 selected). Empty = show all.
+  const MAX_SELECTED_TEAMS = 3
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set())
+  const toggleTeam = (id: string) => {
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        if (next.size >= MAX_SELECTED_TEAMS) return prev
+        next.add(id)
+      }
+      return next
+    })
+  }
+  const isTeamVisible = (id: string) => selectedTeamIds.size === 0 || selectedTeamIds.has(id)
+
+  // Relay ticks: timestamps + team + color + incoming runner (next stint) for the slider ticks
+  const relayTicks = useMemo<Array<{ timestamp: number; teamId: string; teamName: string; teamColor: string; runnerName: string }>>(() => {
     if (!allLaps || !teams) return []
     const teamMap = new Map<string, TeamFull>(teams.map((t) => [t._id, t]))
     return allLaps
       .filter((l: any) => l.type === 'relay_manual' || l.type === 'relay_auto')
+      .filter((l: any) => isTeamVisible(l.teamId))
       .map((l: any) => {
         const team = teamMap.get(l.teamId)
-        // Incoming runner: order[prevCurrentIdx + 1] mod length (next stint after this relay)
         const orderArr: string[] = team?.order && team.order.length > 0
           ? team.order
           : (team?.runners?.map((r) => r.id) ?? [])
@@ -171,12 +188,14 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
         const nextRunner = team?.runners?.find((r) => r.id === nextRunnerId)
         return {
           timestamp: l.timestamp as number,
+          teamId: l.teamId as string,
           teamName: team?.name ?? '',
+          teamColor: team?.color ?? '#A6F060',
           runnerName: nextRunner?.name ?? '',
         }
       })
       .sort((a, b) => a.timestamp - b.timestamp)
-  }, [allLaps, teams])
+  }, [allLaps, teams, selectedTeamIds])
 
   // Index laps per team (from filteredLaps)
   const lapsByTeam = useMemo(() => {
@@ -203,6 +222,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
 
   const markers = useMemo(() => (teams || [])
     .filter(t => t.ready)
+    .filter(t => isTeamVisible(t._id))
     .map(t => {
       const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position').slice().sort((a, b) => a.timestamp - b.timestamp)
       const lastLap = tLaps.length ? tLaps[tLaps.length - 1] : null
@@ -327,7 +347,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             : (t.name || ''),
         subLabel,
       }
-    }), [teams, lapsByTeam, raceStarted, raceStartTime, effectiveNow, event, testMode])
+    }), [teams, lapsByTeam, raceStarted, raceStartTime, effectiveNow, event, testMode, selectedTeamIds])
 
   return (
     <div className="page">
@@ -393,7 +413,43 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
           <div className="card-body">
             {!teams || teams.length === 0 && <div className="empty">Aucune équipe enregistrée.</div>}
             {teams && teams.length > 0 && (
-              <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+              <>
+                <div className="team-filter">
+                  <span className="team-filter-label">
+                    Filtre carte {selectedTeamIds.size > 0 ? `(${selectedTeamIds.size}/${MAX_SELECTED_TEAMS})` : '— toutes affichées'}
+                  </span>
+                  <div className="team-filter-chips">
+                    {teams.map((t) => {
+                      const active = selectedTeamIds.has(t._id)
+                      const disabled = !active && selectedTeamIds.size >= MAX_SELECTED_TEAMS
+                      return (
+                        <button
+                          key={t._id}
+                          type="button"
+                          className={`team-filter-chip${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
+                          onClick={(e) => { e.stopPropagation(); if (!disabled) toggleTeam(t._id) }}
+                          disabled={disabled}
+                          aria-pressed={active}
+                          style={{ '--chip-color': t.color || 'var(--accent)' } as React.CSSProperties}
+                          title={`${t.name}${disabled ? ' (max 3 selectionnees)' : ''}`}
+                        >
+                          <span className="team-filter-dot" />
+                          <span className="team-filter-name">{t.name}</span>
+                        </button>
+                      )
+                    })}
+                    {selectedTeamIds.size > 0 && (
+                      <button
+                        type="button"
+                        className="team-filter-clear"
+                        onClick={() => setSelectedTeamIds(new Set())}
+                      >
+                        Tout afficher
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                 {teams.map(t => {
                   const current = getDbCurrentRunner(t)
                   const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position')
@@ -508,7 +564,8 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
                     </button>
                   )
                 })}
-              </div>
+                </div>
+              </>
             )}
           </div>
         </div>

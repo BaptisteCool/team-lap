@@ -373,13 +373,14 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
 }
 .time-scrubber-tick-line {
   display: block;
-  width: 1px; height: 8px;
-  background: var(--muted-2);
+  width: 2px; height: 10px;
+  background: var(--tick-color, var(--muted-2));
+  border-radius: 1px;
 }
 .time-scrubber-tick-label {
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  color: var(--muted);
+  color: var(--tick-color, var(--muted));
   text-transform: uppercase;
   margin-top: 10px;
   white-space: nowrap;
@@ -405,10 +406,120 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   white-space: nowrap;
 }
 .time-scrubber-tick.is-active .time-scrubber-tick-line {
-  background: var(--accent);
+  background: var(--tick-color, var(--accent));
+  box-shadow: 0 0 6px var(--tick-color, var(--accent));
 }
 .time-scrubber-tick.is-active .time-scrubber-tick-label {
   color: var(--text);
+}
+
+/* Team filter chips */
+.team-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.team-filter-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.team-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.team-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  background: var(--surface-3, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  max-width: 180px;
+  transition: color 120ms, border-color 120ms, background 120ms;
+}
+.team-filter-chip:hover:not(.is-disabled) {
+  color: var(--text);
+  border-color: var(--chip-color, var(--accent));
+}
+.team-filter-chip.is-active {
+  color: var(--text);
+  border-color: var(--chip-color);
+  background: color-mix(in srgb, var(--chip-color) 14%, transparent);
+}
+.team-filter-chip.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.team-filter-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  background: var(--chip-color, var(--accent));
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.team-filter-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.team-filter-clear {
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.team-filter-clear:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+/* Responsive — slider mobile */
+@media (max-width: 720px) {
+  .time-scrubber-row {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .time-scrubber-zoom {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+    overflow-x: auto;
+  }
+  .time-scrubber-zoom-btn {
+    padding: 2px 6px;
+    font-size: 10px;
+  }
+  .time-scrubber-tick-time,
+  .time-scrubber-tick-team,
+  .time-scrubber-tick-runner {
+    display: none;
+  }
+  .time-scrubber-tick-label {
+    font-size: 9px;
+    margin-top: 6px;
+  }
+  .team-filter-chip {
+    max-width: 140px;
+    font-size: 11px;
+    padding: 3px 8px;
+  }
 }
 
 .time-scrubber-row time {

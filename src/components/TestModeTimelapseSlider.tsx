@@ -3,7 +3,7 @@ import React, { useMemo, useState } from 'react'
 
 export type RelayTickInput =
   | number
-  | { timestamp: number; teamName?: string; runnerName?: string }
+  | { timestamp: number; teamName?: string; runnerName?: string; teamColor?: string; teamId?: string }
 
 export type TestModeTimelapseSliderProps = {
   testMode: boolean
@@ -28,6 +28,7 @@ type DerivedTick = {
   label: string
   teamName?: string
   runnerName?: string
+  teamColor?: string
 }
 
 type ZoomLevel = { label: string; ms: number | null }
@@ -131,6 +132,7 @@ export function TestModeTimelapseSlider({
         label: `R${i + 1}`,
         teamName: t.teamName,
         runnerName: t.runnerName,
+        teamColor: t.teamColor,
       }))
   }, [relayTicks])
 
@@ -326,10 +328,10 @@ export function TestModeTimelapseSlider({
         <div className="time-scrubber-ticks" aria-hidden="true">
           {derivedTicks.filter((t) => isTickVisible(t.timestamp)).map((tick) => (
             <button
-              key={tick.timestamp}
+              key={`${tick.timestamp}-${tick.teamName ?? ''}`}
               data-testid="relay-tick"
               className={`time-scrubber-tick${isNearTick(tick) ? ' is-active' : ''}`}
-              style={{ left: `${tickPct(tick.timestamp)}%` }}
+              style={{ left: `${tickPct(tick.timestamp)}%`, ['--tick-color' as any]: tick.teamColor ?? 'var(--muted-2)' }}
               onClick={() => handleTickClick(tick.timestamp)}
               aria-label={`Jump au relais ${tick.label}${tick.teamName ? ` — ${tick.teamName}` : ''}${tick.runnerName ? ` · ${tick.runnerName}` : ''} · ${formatHHmm(tick.timestamp)}`}
               title={`${tick.label}${tick.teamName ? ` — ${tick.teamName}` : ''}${tick.runnerName ? ` · ${tick.runnerName}` : ''} · ${formatHHmm(tick.timestamp)}`}
