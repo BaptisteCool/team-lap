@@ -132,6 +132,12 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   // effectiveNow: virtualNow in testMode (scrub), real now otherwise
   const effectiveNow = testMode ? virtualNow : now
 
+  // Detect large virtualNow jumps (e.g., LIVE button, tick snap) → skip transition
+  const prevEffectiveNowRef = useRef(effectiveNow)
+  const JUMP_THRESHOLD_MS = 2000
+  const isJump = testMode && Math.abs(effectiveNow - prevEffectiveNowRef.current) > JUMP_THRESHOLD_MS
+  useEffect(() => { prevEffectiveNowRef.current = effectiveNow }, [effectiveNow])
+
   const raceStarted = event?.status === 'running'
   const raceStartTime = event?.actualStart || null
   const elapsedMs = raceStarted && raceStartTime ? Math.max(0, effectiveNow - raceStartTime) : 0
@@ -338,7 +344,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             </span>
           </div>
           <div className="card-body">
-            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} instantUpdate={testMode && !isLive} dimmed={isFuture} />
+            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} instantUpdate={testMode && (!isLive || isJump)} dimmed={isFuture} />
             {testMode && raceStarted && (
               <SliderErrorBoundary>
                 <TestModeTimelapseSlider
