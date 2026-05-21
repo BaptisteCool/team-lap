@@ -4,6 +4,7 @@ import React, { useMemo, useState } from 'react'
 export type TestModeTimelapseSliderProps = {
   testMode: boolean
   startTime: number
+  endTime?: number
   virtualNow: number
   setVirtualNow: (t: number) => void
   isLive: boolean
@@ -35,6 +36,7 @@ function formatDecalage(ms: number): string {
 export function TestModeTimelapseSlider({
   testMode,
   startTime,
+  endTime,
   virtualNow,
   setVirtualNow,
   isLive,
@@ -46,9 +48,12 @@ export function TestModeTimelapseSlider({
 
   const [isDragging, setIsDragging] = useState(false)
 
-  const totalMs = Date.now() - startTime
+  const nowMs = Date.now()
+  const upperBound = endTime ?? nowMs
+  const totalMs = Math.max(1, upperBound - startTime)
   const sliderValue = virtualNow - startTime
-  const fillPct = totalMs > 0 ? Math.min(100, Math.max(0, (sliderValue / totalMs) * 100)) : 100
+  const fillPct = Math.min(100, Math.max(0, (sliderValue / totalMs) * 100))
+  const livePct = Math.min(100, Math.max(0, ((nowMs - startTime) / totalMs) * 100))
 
   const derivedTicks = useMemo<DerivedTick[]>(() => {
     if (!relayTicks || relayTicks.length === 0) return []
@@ -162,8 +167,15 @@ export function TestModeTimelapseSlider({
 
       <div
         className="time-scrubber-track"
-        style={{ '--fill-pct': `${fillPct}%` } as React.CSSProperties}
+        style={{ '--fill-pct': `${fillPct}%`, '--live-pct': `${livePct}%` } as React.CSSProperties}
       >
+        {endTime && livePct < 100 && (
+          <span
+            className="time-scrubber-live-marker"
+            style={{ left: `${livePct}%` }}
+            aria-hidden="true"
+          />
+        )}
         <input
           type="range"
           min={0}

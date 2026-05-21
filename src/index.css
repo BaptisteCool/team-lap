@@ -291,6 +291,18 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   transition: width 80ms ease, height 80ms ease;
 }
 
+.time-scrubber-live-marker {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 14px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: 0 0 6px var(--accent);
+}
 .time-scrubber-ticks {
   position: absolute;
   inset: 0;

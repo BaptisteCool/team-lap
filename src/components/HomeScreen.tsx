@@ -115,7 +115,9 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   const testMode = (event as any)?.testMode === true
   const startTime = event?.actualStart ?? Date.now()
   const testModeDivider = (event as any)?.testModeDivider || 3
-  const { virtualNow, setVirtualNow, isLive, goLive } = useVirtualClock(startTime, testModeDivider)
+  const raceDurationMs = (event as any)?.raceDuration ?? 24 * 3600 * 1000
+  const endTime = startTime + raceDurationMs
+  const { virtualNow, setVirtualNow, isLive, goLive } = useVirtualClock(startTime, testModeDivider, { endTime })
 
   // effectiveNow: virtualNow in testMode (scrub), real now otherwise
   const effectiveNow = testMode ? virtualNow : now
@@ -311,6 +313,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
               <TestModeTimelapseSlider
                 testMode={testMode}
                 startTime={startTime}
+                endTime={endTime}
                 virtualNow={virtualNow}
                 setVirtualNow={setVirtualNow}
                 isLive={isLive}
