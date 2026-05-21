@@ -155,3 +155,80 @@ export function isMockRelayLap(lapNumber: number): boolean {
   const next = SCHEDULE[idx + 1]?.runner
   return next === undefined || next !== current
 }
+
+// ─── Snapshot helper ───────────────────────────────────────────────────────
+
+import { getMockLapMeta, shouldUseMockChronoplace } from './mockChronoplace'
+
+export type SnapshotLap = {
+  teamId: string
+  teamSlug: string
+  lapNumber: number
+  timestamp: number
+  lapTime: number
+  type: 'checkpoint_auto' | 'relay_auto'
+  runnerId: string
+  prevCurrentIdx: number
+  source: 'mock_snapshot'
+}
+
+// All mock slugs available — used as default when no slugs provided.
+const ALL_MOCK_SLUGS = [
+  'heroes-academy',
+  'f2tards-endurants',
+  "les-licornes-ca-n'existe-pas",
+  'aiglehoux-et-compagnie',
+]
+
+// Pure function — no ctx, no DB.
+// Iterates the baked schedule for each slug and returns all laps whose
+// revealAtMs <= virtualNow, sorted by timestamp asc.
+// When slugs is omitted, all known mock slugs are used.
+export function computeSnapshotAt(
+  event: {
+    actualStart: number
+    testModeDivider?: number
+  },
+  virtualNow: number,
+  slugs?: string[],
+): SnapshotLap[] {
+  const { actualStart } = event
+  const divider = event.testModeDivider && event.testModeDivider > 0 ? event.testModeDivider : 3
+
+  if (!actualStart || virtualNow <= actualStart) return []
+
+  const targetSlugs = slugs && slugs.length > 0
+    ? slugs.filter((s) => shouldUseMockChronoplace(s, true))
+    : ALL_MOCK_SLUGS
+
+  const result: SnapshotLap[] = []
+
+  for (const slug of targetSlugs) {
+    let prevCurrentIdx = 0
+    for (let lapN = 1; ; lapN++) {
+      const meta = getMockLapMeta(slug, lapN, actualStart, divider)
+      if (!meta) break
+      if (meta.revealAtMs > virtualNow) break
+
+      const isRelay = isMockRelayLap(lapN)
+      const runnerName = getMockRunnerForLap(lapN) ?? ''
+
+      result.push({
+        teamId: slug,
+        teamSlug: slug,
+        lapNumber: lapN,
+        timestamp: meta.revealAtMs,
+        lapTime: meta.lapTimeMs,
+        type: isRelay ? 'relay_auto' : 'checkpoint_auto',
+        runnerId: runnerName,
+        prevCurrentIdx,
+        source: 'mock_snapshot',
+      })
+
+      if (isRelay) prevCurrentIdx++
+    }
+  }
+
+  result.sort((a, b) => a.timestamp - b.timestamp)
+  return result
+}

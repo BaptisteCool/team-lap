@@ -1,9 +1,16 @@
-import { RotateCcw } from 'lucide-react'
+import { FastForward, FlaskConical, Loader2, Pause, Play, RotateCcw } from 'lucide-react'
 import React, { useMemo, useState } from 'react'
+import { TeamFilterMultiSelect } from './TeamFilterMultiSelect'
 
 export type RelayTickInput =
   | number
-  | { timestamp: number; teamName?: string; runnerName?: string }
+  | { timestamp: number; teamName?: string; runnerName?: string; teamColor?: string; teamId?: string }
+
+export type TeamFilterOption = {
+  id: string
+  name: string
+  color: string
+}
 
 export type TestModeTimelapseSliderProps = {
   testMode: boolean
@@ -13,8 +20,19 @@ export type TestModeTimelapseSliderProps = {
   setVirtualNow: (t: number) => void
   isLive: boolean
   goLive: () => void
+  isPlaying?: boolean
+  togglePlay?: () => void
   relayTicks?: RelayTickInput[]
   snapToTicks?: boolean
+  isFuture?: boolean
+  futureOffsetMs?: number
+  isLoadingFuture?: boolean
+  futureError?: Error | null
+  teamFilterOptions?: TeamFilterOption[]
+  selectedTeamIds?: Set<string>
+  onToggleTeam?: (id: string) => void
+  onClearTeams?: () => void
+  maxSelectedTeams?: number
 }
 
 type DerivedTick = {
@@ -22,6 +40,7 @@ type DerivedTick = {
   label: string
   teamName?: string
   runnerName?: string
+  teamColor?: string
 }
 
 type ZoomLevel = { label: string; ms: number | null }
@@ -57,8 +76,19 @@ export function TestModeTimelapseSlider({
   setVirtualNow,
   isLive,
   goLive,
+  isPlaying = false,
+  togglePlay,
+  teamFilterOptions,
+  selectedTeamIds,
+  onToggleTeam,
+  onClearTeams,
+  maxSelectedTeams = 3,
   relayTicks,
   snapToTicks = true,
+  isFuture = false,
+  futureOffsetMs,
+  isLoadingFuture = false,
+  futureError,
 }: TestModeTimelapseSliderProps): React.ReactElement | null {
   if (!testMode) return null
 
@@ -68,6 +98,11 @@ export function TestModeTimelapseSlider({
   const nowMs = Date.now()
   const fullUpper = endTime ?? nowMs
   const fullLower = startTime
+
+  // When endTime is provided, use absolute timestamps for slider min/max/value.
+  // This allows virtualNow > Date.now() (future scrub).
+  // When endTime is absent, use relative offsets (Phase 1 behaviour).
+  const useAbsolute = endTime !== undefined
 
   // Window = visible slider range. When zoomed, centered on virtualNow + clamped to [fullLower, fullUpper].
   let windowStart = fullLower
@@ -90,10 +125,15 @@ export function TestModeTimelapseSlider({
   }
 
   const windowMs = Math.max(1, windowEnd - windowStart)
-  const sliderValue = Math.max(0, virtualNow - windowStart)
-  const fillPct = Math.min(100, Math.max(0, (sliderValue / windowMs) * 100))
-  const liveOffset = nowMs - windowStart
-  const livePct = (liveOffset / windowMs) * 100
+
+  // Slider min/max/value: absolute timestamps when endTime provided, offsets otherwise.
+  const sliderMin = useAbsolute ? windowStart : 0
+  const sliderMax = useAbsolute ? windowEnd : windowMs
+  const sliderValue = useAbsolute ? virtualNow : Math.max(0, virtualNow - windowStart)
+
+  const fillPct = Math.min(100, Math.max(0, ((sliderValue - sliderMin) / (sliderMax - sliderMin)) * 100))
+  const liveOffset = useAbsolute ? nowMs : nowMs - windowStart
+  const livePct = ((liveOffset - sliderMin) / (sliderMax - sliderMin)) * 100
   const liveInWindow = nowMs >= windowStart && nowMs <= windowEnd
 
   const derivedTicks = useMemo<DerivedTick[]>(() => {
@@ -109,6 +149,7 @@ export function TestModeTimelapseSlider({
         label: `R${i + 1}`,
         teamName: t.teamName,
         runnerName: t.runnerName,
+        teamColor: t.teamColor,
       }))
   }, [relayTicks])
 
@@ -128,7 +169,7 @@ export function TestModeTimelapseSlider({
 
   function handleInput(e: React.FormEvent<HTMLInputElement>) {
     const val = Number((e.target as HTMLInputElement).value)
-    setVirtualNow(windowStart + val)
+    setVirtualNow(useAbsolute ? val : windowStart + val)
   }
 
   function handleMouseDown() {
@@ -183,7 +224,7 @@ export function TestModeTimelapseSlider({
   }
 
   const decalageMs = nowMs - virtualNow
-  const decalageLabel = formatDecalage(decalageMs)
+  const decalageLabel = formatDecalage(Math.abs(decalageMs))
 
   return (
     <div
@@ -193,20 +234,39 @@ export function TestModeTimelapseSlider({
     >
       <div className="time-scrubber-row">
         <div aria-live="polite" aria-atomic="true">
-          {!isLive && (
+          {isFuture ? (
+            <span className="badge future" data-testid="future-badge">
+              {isLoadingFuture ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <FastForward size={16} />
+              )}
+              FUTURE +{formatDecalage(futureOffsetMs ?? 0)}
+            </span>
+          ) : !isLive ? (
             <span className="badge warn" data-testid="rewind-badge">
               <RotateCcw size={16} />
               REWIND -{decalageLabel}
             </span>
-          )}
+          ) : null}
         </div>
 
         <time
-          className={`mono${!isLive ? ' is-rewind' : ''}`}
+          className={`mono${isFuture ? ' is-future' : !isLive ? ' is-rewind' : ''}`}
           aria-label="Position temporelle actuelle"
         >
           {formatHHmm(virtualNow)}
         </time>
+
+        {teamFilterOptions && teamFilterOptions.length > 0 && onToggleTeam && (
+          <TeamFilterMultiSelect
+            options={teamFilterOptions}
+            selectedIds={selectedTeamIds ?? new Set()}
+            onToggle={onToggleTeam}
+            onClear={onClearTeams ?? (() => {})}
+            maxSelected={maxSelectedTeams}
+          />
+        )}
 
         <div className="time-scrubber-zoom" role="group" aria-label="Zoom temporel">
           {ZOOM_LEVELS.map((z) => (
@@ -221,6 +281,18 @@ export function TestModeTimelapseSlider({
             </button>
           ))}
         </div>
+
+        {!isLive && togglePlay && (
+          <button
+            type="button"
+            className="time-scrubber-playpause"
+            onClick={togglePlay}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+          </button>
+        )}
 
         <button
           className={`live-pill${isLive ? ' is-live' : ''}`}
@@ -246,15 +318,21 @@ export function TestModeTimelapseSlider({
         )}
         <input
           type="range"
-          min={0}
-          max={windowMs}
+          min={sliderMin}
+          max={sliderMax}
           value={sliderValue}
           step={1}
           aria-label="Scrubber temporel — position dans la course"
-          aria-valuemin={0}
-          aria-valuemax={windowMs}
+          aria-valuemin={sliderMin}
+          aria-valuemax={sliderMax}
           aria-valuenow={sliderValue}
-          aria-valuetext={`${formatHHmm(virtualNow)} — ${isLive ? 'live' : decalageLabel}`}
+          aria-valuetext={
+            isFuture
+              ? `${formatHHmm(virtualNow)} — FUTUR +${formatDecalage(futureOffsetMs ?? 0)}`
+              : isLive
+                ? `${formatHHmm(virtualNow)} — live`
+                : `${formatHHmm(virtualNow)} — ${decalageLabel}`
+          }
           onInput={handleInput}
           onMouseDown={handleMouseDown}
           onMouseUp={handleMouseUp}
@@ -277,10 +355,10 @@ export function TestModeTimelapseSlider({
         <div className="time-scrubber-ticks" aria-hidden="true">
           {derivedTicks.filter((t) => isTickVisible(t.timestamp)).map((tick) => (
             <button
-              key={tick.timestamp}
+              key={`${tick.timestamp}-${tick.teamName ?? ''}`}
               data-testid="relay-tick"
               className={`time-scrubber-tick${isNearTick(tick) ? ' is-active' : ''}`}
-              style={{ left: `${tickPct(tick.timestamp)}%` }}
+              style={{ left: `${tickPct(tick.timestamp)}%`, ['--tick-color' as any]: tick.teamColor ?? 'var(--muted-2)' }}
               onClick={() => handleTickClick(tick.timestamp)}
               aria-label={`Jump au relais ${tick.label}${tick.teamName ? ` — ${tick.teamName}` : ''}${tick.runnerName ? ` · ${tick.runnerName}` : ''} · ${formatHHmm(tick.timestamp)}`}
               title={`${tick.label}${tick.teamName ? ` — ${tick.teamName}` : ''}${tick.runnerName ? ` · ${tick.runnerName}` : ''} · ${formatHHmm(tick.timestamp)}`}
@@ -299,6 +377,17 @@ export function TestModeTimelapseSlider({
           ))}
         </div>
       </div>
+      {isFuture && (
+        <div className="future-simulation-label" aria-live="polite">
+          <FlaskConical size={12} />
+          Projection mock · positions estimees
+        </div>
+      )}
+      {futureError && (
+        <div className="future-error-label" aria-live="polite">
+          Projection indisponible — positions affichees sont les dernieres connues
+        </div>
+      )}
     </div>
   )
 }

@@ -1,9 +1,11 @@
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '../convex/hooks'
+import { useFutureSnapshot } from '../hooks/useFutureSnapshot'
 import { useVirtualClock } from '../hooks/useVirtualClock'
 import { fmtClock, fmtKmPace, kmPaceToLapMs, TEAM_COLOR_PALETTE } from '../lib/race-data'
 import { GpxMap } from './GpxMap'
+import { SliderErrorBoundary } from './SliderErrorBoundary'
 import { TestModeBadge } from './TestModeBadge'
 import { TestModeTimelapseSlider } from './TestModeTimelapseSlider'
 
@@ -117,10 +119,24 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   const testModeDivider = (event as any)?.testModeDivider || 3
   const raceDurationMs = (event as any)?.raceDuration ?? 24 * 3600 * 1000
   const endTime = startTime + raceDurationMs
-  const { virtualNow, setVirtualNow, isLive, goLive } = useVirtualClock(startTime, testModeDivider, { endTime })
+  const { virtualNow, setVirtualNow, isLive, goLive, isPlaying, togglePlay } = useVirtualClock(startTime, testModeDivider, { endTime })
+
+  const isFuture = testMode && virtualNow > Date.now() + 1000
+
+  const {
+    laps: futureLaps,
+    isLoading: isLoadingFuture,
+    error: futureError,
+  } = useFutureSnapshot(event?._id, virtualNow, testMode)
 
   // effectiveNow: virtualNow in testMode (scrub), real now otherwise
   const effectiveNow = testMode ? virtualNow : now
+
+  // Detect large virtualNow jumps (e.g., LIVE button, tick snap) → skip transition
+  const prevEffectiveNowRef = useRef(effectiveNow)
+  const JUMP_THRESHOLD_MS = 2000
+  const isJump = testMode && Math.abs(effectiveNow - prevEffectiveNowRef.current) > JUMP_THRESHOLD_MS
+  useEffect(() => { prevEffectiveNowRef.current = effectiveNow }, [effectiveNow])
 
   const raceStarted = event?.status === 'running'
   const raceStartTime = event?.actualStart || null
@@ -128,20 +144,40 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
 
   // Laps filtered by virtualNow in testMode — memoised for performance
   const filteredLaps = useMemo(() => {
+    if (!testMode) return allLaps ?? null
+    if (virtualNow > Date.now() + 1000) {
+      return futureLaps ?? (allLaps?.filter((l: any) => l.timestamp <= Date.now()) ?? null)
+    }
     if (!allLaps) return null
-    if (!testMode) return allLaps
     return allLaps.filter((l: any) => l.timestamp <= virtualNow)
-  }, [allLaps, testMode, virtualNow])
+  }, [allLaps, testMode, virtualNow, futureLaps])
 
-  // Relay ticks: timestamps + team + incoming runner (next stint) for the slider ticks
-  const relayTicks = useMemo<Array<{ timestamp: number; teamName: string; runnerName: string }>>(() => {
+  // Team filter (max 3 selected). Empty = show all.
+  const MAX_SELECTED_TEAMS = 3
+  const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set())
+  const toggleTeam = (id: string) => {
+    setSelectedTeamIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        if (next.size >= MAX_SELECTED_TEAMS) return prev
+        next.add(id)
+      }
+      return next
+    })
+  }
+  const isTeamVisible = (id: string) => selectedTeamIds.size === 0 || selectedTeamIds.has(id)
+
+  // Relay ticks: timestamps + team + color + incoming runner (next stint) for the slider ticks
+  const relayTicks = useMemo<Array<{ timestamp: number; teamId: string; teamName: string; teamColor: string; runnerName: string }>>(() => {
     if (!allLaps || !teams) return []
     const teamMap = new Map<string, TeamFull>(teams.map((t) => [t._id, t]))
     return allLaps
       .filter((l: any) => l.type === 'relay_manual' || l.type === 'relay_auto')
+      .filter((l: any) => isTeamVisible(l.teamId))
       .map((l: any) => {
         const team = teamMap.get(l.teamId)
-        // Incoming runner: order[prevCurrentIdx + 1] mod length (next stint after this relay)
         const orderArr: string[] = team?.order && team.order.length > 0
           ? team.order
           : (team?.runners?.map((r) => r.id) ?? [])
@@ -152,12 +188,14 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
         const nextRunner = team?.runners?.find((r) => r.id === nextRunnerId)
         return {
           timestamp: l.timestamp as number,
+          teamId: l.teamId as string,
           teamName: team?.name ?? '',
+          teamColor: team?.color ?? '#A6F060',
           runnerName: nextRunner?.name ?? '',
         }
       })
       .sort((a, b) => a.timestamp - b.timestamp)
-  }, [allLaps, teams])
+  }, [allLaps, teams, selectedTeamIds])
 
   // Index laps per team (from filteredLaps)
   const lapsByTeam = useMemo(() => {
@@ -184,6 +222,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
 
   const markers = useMemo(() => (teams || [])
     .filter(t => t.ready)
+    .filter(t => isTeamVisible(t._id))
     .map(t => {
       const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position').slice().sort((a, b) => a.timestamp - b.timestamp)
       const lastLap = tLaps.length ? tLaps[tLaps.length - 1] : null
@@ -308,7 +347,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             : (t.name || ''),
         subLabel,
       }
-    }), [teams, lapsByTeam, raceStarted, raceStartTime, effectiveNow, event, testMode])
+    }), [teams, lapsByTeam, raceStarted, raceStartTime, effectiveNow, event, testMode, selectedTeamIds])
 
   return (
     <div className="page">
@@ -325,18 +364,31 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             </span>
           </div>
           <div className="card-body">
-            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} instantUpdate={testMode && !isLive} />
+            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} instantUpdate={testMode && (!isLive || isJump)} dimmed={isFuture} />
             {testMode && raceStarted && (
-              <TestModeTimelapseSlider
-                testMode={testMode}
-                startTime={startTime}
-                endTime={endTime}
-                virtualNow={virtualNow}
-                setVirtualNow={setVirtualNow}
-                isLive={isLive}
-                goLive={goLive}
-                relayTicks={relayTicks}
-              />
+              <SliderErrorBoundary>
+                <TestModeTimelapseSlider
+                  testMode={testMode}
+                  startTime={startTime}
+                  endTime={endTime}
+                  virtualNow={virtualNow}
+                  setVirtualNow={setVirtualNow}
+                  isLive={isLive}
+                  goLive={goLive}
+                  isPlaying={isPlaying}
+                  togglePlay={togglePlay}
+                  teamFilterOptions={(teams ?? []).map(t => ({ id: t._id, name: t.name, color: t.color || '#A6F060' }))}
+                  selectedTeamIds={selectedTeamIds}
+                  onToggleTeam={toggleTeam}
+                  onClearTeams={() => setSelectedTeamIds(new Set())}
+                  maxSelectedTeams={MAX_SELECTED_TEAMS}
+                  relayTicks={relayTicks}
+                  isFuture={isFuture}
+                  futureOffsetMs={Math.max(0, virtualNow - Date.now())}
+                  isLoadingFuture={isLoadingFuture}
+                  futureError={futureError}
+                />
+              </SliderErrorBoundary>
             )}
           </div>
         </div>
@@ -366,7 +418,8 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
           <div className="card-body">
             {!teams || teams.length === 0 && <div className="empty">Aucune équipe enregistrée.</div>}
             {teams && teams.length > 0 && (
-              <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+              <>
+                <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                 {teams.map(t => {
                   const current = getDbCurrentRunner(t)
                   const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position')
@@ -481,7 +534,8 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
                     </button>
                   )
                 })}
-              </div>
+                </div>
+              </>
             )}
           </div>
         </div>
