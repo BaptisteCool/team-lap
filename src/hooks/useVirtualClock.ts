@@ -11,6 +11,10 @@ export type UseVirtualClockReturn = {
   setVirtualNow: (t: number) => void
   isLive: boolean
   goLive: () => void
+  isPlaying: boolean
+  play: () => void
+  pause: () => void
+  togglePlay: () => void
 }
 
 const TICK_MS = 250
@@ -21,36 +25,60 @@ export function useVirtualClock(
   options?: UseVirtualClockOptions,
 ): UseVirtualClockReturn {
   const endTime = options?.endTime ?? options?.maxTime
-  // sliderMs = offset from startTime to current slider position (ms). When isLive, this tracks Date.now()-startTime.
   const [sliderMs, setSliderMs] = useState<number>(() => Math.max(0, Date.now() - startTime))
   const [isLive, setIsLive] = useState<boolean>(true)
+  const [isPlaying, setIsPlaying] = useState<boolean>(false)
   const lastUpdateRef = useRef<number>(0)
 
-  // Auto-tick: when live, slider tracks real time; also forces re-render so derived values stay fresh.
+  // Auto-tick: live → track real time; playing (not live) → advance sliderMs by TICK_MS; paused → frozen.
   useEffect(() => {
     const id = setInterval(() => {
       if (isLive) {
         setSliderMs(Math.max(0, Date.now() - startTime))
+      } else if (isPlaying) {
+        setSliderMs((prev) => {
+          const next = prev + TICK_MS
+          const upper = endTime ? endTime - startTime : Math.max(0, Date.now() - startTime)
+          if (next >= upper) {
+            setIsPlaying(false)
+            return upper
+          }
+          return next
+        })
       } else {
-        // force re-render to refresh derived (rewind decalage etc.)
+        // Paused — force re-render so derived (rewind decalage) refreshes
         setSliderMs((v) => v)
       }
     }, TICK_MS)
     return () => clearInterval(id)
-  }, [isLive, startTime])
+  }, [isLive, isPlaying, startTime, endTime])
 
   // Reset to live when testModeDivider changes
   useEffect(() => {
     lastUpdateRef.current = 0
     setSliderMs(Math.max(0, Date.now() - startTime))
     setIsLive(true)
+    setIsPlaying(false)
   }, [testModeDivider, startTime])
 
   const goLive = useCallback(() => {
     lastUpdateRef.current = 0
     setSliderMs(Math.max(0, Date.now() - startTime))
     setIsLive(true)
+    setIsPlaying(false)
   }, [startTime])
+
+  const play = useCallback(() => {
+    setIsPlaying(true)
+  }, [])
+
+  const pause = useCallback(() => {
+    setIsPlaying(false)
+  }, [])
+
+  const togglePlay = useCallback(() => {
+    setIsPlaying((p) => !p)
+  }, [])
 
   const setVirtualNow = useCallback(
     (t: number) => {
@@ -61,13 +89,15 @@ export function useVirtualClock(
       const clamped = Math.max(startTime, Math.min(maxBound, t))
       const ms = clamped - startTime
       setSliderMs(ms)
-      // Consider "live" if within 1s of real now AND no endTime override (or at/past current real position)
-      setIsLive(clamped >= now - 1000)
+      const live = clamped >= now - 1000
+      setIsLive(live)
+      // Drag pauses playback (user takes control)
+      if (!live) setIsPlaying(false)
     },
     [startTime, endTime],
   )
 
   const virtualNow = startTime + sliderMs
 
-  return { virtualNow, setVirtualNow, isLive, goLive }
+  return { virtualNow, setVirtualNow, isLive, goLive, isPlaying, play, pause, togglePlay }
 }

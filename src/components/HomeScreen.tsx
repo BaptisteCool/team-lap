@@ -119,7 +119,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   const testModeDivider = (event as any)?.testModeDivider || 3
   const raceDurationMs = (event as any)?.raceDuration ?? 24 * 3600 * 1000
   const endTime = startTime + raceDurationMs
-  const { virtualNow, setVirtualNow, isLive, goLive } = useVirtualClock(startTime, testModeDivider, { endTime })
+  const { virtualNow, setVirtualNow, isLive, goLive, isPlaying, togglePlay } = useVirtualClock(startTime, testModeDivider, { endTime })
 
   const isFuture = testMode && virtualNow > Date.now() + 1000
 
@@ -349,6 +349,8 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
                   setVirtualNow={setVirtualNow}
                   isLive={isLive}
                   goLive={goLive}
+                  isPlaying={isPlaying}
+                  togglePlay={togglePlay}
                   relayTicks={relayTicks}
                   isFuture={isFuture}
                   futureOffsetMs={Math.max(0, virtualNow - Date.now())}

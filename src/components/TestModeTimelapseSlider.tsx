@@ -1,4 +1,4 @@
-import { FastForward, FlaskConical, Loader2, RotateCcw } from 'lucide-react'
+import { FastForward, FlaskConical, Loader2, Pause, Play, RotateCcw } from 'lucide-react'
 import React, { useMemo, useState } from 'react'
 
 export type RelayTickInput =
@@ -13,6 +13,8 @@ export type TestModeTimelapseSliderProps = {
   setVirtualNow: (t: number) => void
   isLive: boolean
   goLive: () => void
+  isPlaying?: boolean
+  togglePlay?: () => void
   relayTicks?: RelayTickInput[]
   snapToTicks?: boolean
   isFuture?: boolean
@@ -61,6 +63,8 @@ export function TestModeTimelapseSlider({
   setVirtualNow,
   isLive,
   goLive,
+  isPlaying = false,
+  togglePlay,
   relayTicks,
   snapToTicks = true,
   isFuture = false,
@@ -248,6 +252,18 @@ export function TestModeTimelapseSlider({
             </button>
           ))}
         </div>
+
+        {!isLive && togglePlay && (
+          <button
+            type="button"
+            className="time-scrubber-playpause"
+            onClick={togglePlay}
+            aria-label={isPlaying ? 'Pause' : 'Play'}
+            title={isPlaying ? 'Pause' : 'Play'}
+          >
+            {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+          </button>
+        )}
 
         <button
           className={`live-pill${isLive ? ' is-live' : ''}`}

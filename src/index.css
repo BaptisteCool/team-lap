@@ -317,6 +317,24 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   border-color: var(--accent);
   background: var(--accent-soft, rgba(166,240,96,0.14));
 }
+.time-scrubber-playpause {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-right: 6px;
+  background: var(--surface-3, transparent);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+.time-scrubber-playpause:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
 .time-scrubber-live-marker {
   position: absolute;
   top: -3px;
