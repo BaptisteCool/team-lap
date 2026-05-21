@@ -23,11 +23,6 @@ import React from 'react'
 // Supprimer ces mocks apres implementation (GREEN).
 // ---------------------------------------------------------------------------
 
-vi.mock('../../components/TestModeTimelapseSlider', () => ({
-  // Stub — rend null inconditionnellement (pas de slider, pas de ticks, pas de boutons)
-  TestModeTimelapseSlider: () => null,
-}))
-
 vi.mock('../../convex/hooks', () => ({
   useQuery: vi.fn(() => null),
   useMutation: vi.fn(() => vi.fn().mockResolvedValue(undefined)),
