@@ -291,6 +291,32 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   transition: width 80ms ease, height 80ms ease;
 }
 
+.time-scrubber-zoom {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.time-scrubber-zoom-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--muted);
+  background: var(--surface-3, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+.time-scrubber-zoom-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.time-scrubber-zoom-btn.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(166,240,96,0.14));
+}
 .time-scrubber-live-marker {
   position: absolute;
   top: -3px;

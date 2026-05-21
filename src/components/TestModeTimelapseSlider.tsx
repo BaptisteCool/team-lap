@@ -18,6 +18,16 @@ type DerivedTick = {
   label: string
 }
 
+type ZoomLevel = { label: string; ms: number | null }
+
+const ZOOM_LEVELS: ZoomLevel[] = [
+  { label: '5m', ms: 5 * 60 * 1000 },
+  { label: '30m', ms: 30 * 60 * 1000 },
+  { label: '1h', ms: 60 * 60 * 1000 },
+  { label: '6h', ms: 6 * 60 * 60 * 1000 },
+  { label: 'all', ms: null },
+]
+
 function formatHHmm(ts: number): string {
   const d = new Date(ts)
   const h = String(d.getHours()).padStart(2, '0')
@@ -47,13 +57,38 @@ export function TestModeTimelapseSlider({
   if (!testMode) return null
 
   const [isDragging, setIsDragging] = useState(false)
+  const [zoomMs, setZoomMs] = useState<number | null>(null)
 
   const nowMs = Date.now()
-  const upperBound = endTime ?? nowMs
-  const totalMs = Math.max(1, upperBound - startTime)
-  const sliderValue = virtualNow - startTime
-  const fillPct = Math.min(100, Math.max(0, (sliderValue / totalMs) * 100))
-  const livePct = Math.min(100, Math.max(0, ((nowMs - startTime) / totalMs) * 100))
+  const fullUpper = endTime ?? nowMs
+  const fullLower = startTime
+
+  // Window = visible slider range. When zoomed, centered on virtualNow + clamped to [fullLower, fullUpper].
+  let windowStart = fullLower
+  let windowEnd = fullUpper
+  if (zoomMs && zoomMs < fullUpper - fullLower) {
+    const half = zoomMs / 2
+    let ws = virtualNow - half
+    let we = virtualNow + half
+    if (ws < fullLower) {
+      we += (fullLower - ws)
+      ws = fullLower
+    }
+    if (we > fullUpper) {
+      const overflow = we - fullUpper
+      we = fullUpper
+      ws = Math.max(fullLower, ws - overflow)
+    }
+    windowStart = ws
+    windowEnd = we
+  }
+
+  const windowMs = Math.max(1, windowEnd - windowStart)
+  const sliderValue = Math.max(0, virtualNow - windowStart)
+  const fillPct = Math.min(100, Math.max(0, (sliderValue / windowMs) * 100))
+  const liveOffset = nowMs - windowStart
+  const livePct = (liveOffset / windowMs) * 100
+  const liveInWindow = nowMs >= windowStart && nowMs <= windowEnd
 
   const derivedTicks = useMemo<DerivedTick[]>(() => {
     if (!relayTicks || relayTicks.length === 0) return []
@@ -68,13 +103,18 @@ export function TestModeTimelapseSlider({
   }
 
   function tickPct(ts: number): number {
-    if (totalMs <= 0) return 0
-    return Math.min(100, Math.max(0, ((ts - startTime) / totalMs) * 100))
+    return ((ts - windowStart) / windowMs) * 100
+  }
+
+  function isTickVisible(ts: number): boolean {
+    // Only filter when zoomed in; full view always renders all ticks (clamped).
+    if (zoomMs == null) return true
+    return ts >= windowStart && ts <= windowEnd
   }
 
   function handleInput(e: React.FormEvent<HTMLInputElement>) {
     const val = Number((e.target as HTMLInputElement).value)
-    setVirtualNow(startTime + val)
+    setVirtualNow(windowStart + val)
   }
 
   function handleMouseDown() {
@@ -128,7 +168,7 @@ export function TestModeTimelapseSlider({
     setVirtualNow(virtualNow + delta)
   }
 
-  const decalageMs = Date.now() - virtualNow
+  const decalageMs = nowMs - virtualNow
   const decalageLabel = formatDecalage(decalageMs)
 
   return (
@@ -154,6 +194,20 @@ export function TestModeTimelapseSlider({
           {formatHHmm(virtualNow)}
         </time>
 
+        <div className="time-scrubber-zoom" role="group" aria-label="Zoom temporel">
+          {ZOOM_LEVELS.map((z) => (
+            <button
+              key={z.label}
+              type="button"
+              className={`time-scrubber-zoom-btn${zoomMs === z.ms ? ' is-active' : ''}`}
+              onClick={() => setZoomMs(z.ms)}
+              aria-pressed={zoomMs === z.ms}
+            >
+              {z.label}
+            </button>
+          ))}
+        </div>
+
         <button
           className={`live-pill${isLive ? ' is-live' : ''}`}
           onClick={isLive ? undefined : goLive}
@@ -169,7 +223,7 @@ export function TestModeTimelapseSlider({
         className="time-scrubber-track"
         style={{ '--fill-pct': `${fillPct}%`, '--live-pct': `${livePct}%` } as React.CSSProperties}
       >
-        {endTime && livePct < 100 && (
+        {liveInWindow && (
           <span
             className="time-scrubber-live-marker"
             style={{ left: `${livePct}%` }}
@@ -179,12 +233,12 @@ export function TestModeTimelapseSlider({
         <input
           type="range"
           min={0}
-          max={totalMs}
+          max={windowMs}
           value={sliderValue}
           step={1}
           aria-label="Scrubber temporel — position dans la course"
           aria-valuemin={0}
-          aria-valuemax={totalMs}
+          aria-valuemax={windowMs}
           aria-valuenow={sliderValue}
           aria-valuetext={`${formatHHmm(virtualNow)} — ${isLive ? 'live' : decalageLabel}`}
           onInput={handleInput}
@@ -207,7 +261,7 @@ export function TestModeTimelapseSlider({
         />
 
         <div className="time-scrubber-ticks" aria-hidden="true">
-          {derivedTicks.map((tick) => (
+          {derivedTicks.filter((t) => isTickVisible(t.timestamp)).map((tick) => (
             <button
               key={tick.timestamp}
               data-testid="relay-tick"
