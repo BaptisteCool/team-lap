@@ -1,5 +1,5 @@
-import { v } from 'convex/values'
-import { action, internalAction, internalMutation, internalQuery } from './_generated/server'
+import { v, ConvexError } from 'convex/values'
+import { action, internalAction, internalMutation, internalQuery, query } from './_generated/server'
 import { internal } from './_generated/api'
 import {
   buildChronoplaceUrl,
@@ -9,7 +9,7 @@ import {
 import { computeNextRunnerIdx, consumeQueueOnRelay, type GroupModeEntry } from './lib/nextRunner'
 import { getEffectiveTimings } from './lib/timings'
 import { buildMockChronoplaceResponse, getMockLapMeta, getMockNextLapTimeMs, shouldUseMockChronoplace } from './lib/mockChronoplace'
-import { getMockRunnerForLap, getMockStintLengthForLap, isMockRelayLap } from './lib/mockChronoplaceSchedule'
+import { getMockRunnerForLap, getMockStintLengthForLap, isMockRelayLap, computeSnapshotAt } from './lib/mockChronoplaceSchedule'
 
 // Min lap gap floor — also used to guard pace calibration against double-tap garbage.
 const MIN_LAP_GAP_MS = 5000
@@ -909,6 +909,56 @@ export const pollBurstStep = internalAction({
     await ctx.runMutation(internal.chronoplace.clearAutoPaused, { teamId })
     await ctx.runMutation(internal.chronoplace.scheduleNextAutoBurst, { teamId })
     return { ok: true, lapNumber: newLap.nb_tours, apply: applyResult }
+  },
+})
+
+// ─── Public queries ────────────────────────────────────────────────────────
+
+// Read-only query: compute the projected lap state for all mock teams at
+// virtualNow. Strictly gated behind testMode=true — throws ConvexError otherwise.
+// Never writes to any table.
+export const getMockSnapshotAt = query({
+  args: {
+    eventId: v.id('events'),
+    virtualNow: v.number(),
+  },
+  handler: async (ctx, { eventId, virtualNow }) => {
+    const event = await ctx.db.get(eventId)
+    if (!event?.testMode) {
+      throw new ConvexError('getMockSnapshotAt requires testMode=true')
+    }
+
+    const actualStart = (event as any).actualStart as number | undefined
+    if (!actualStart || virtualNow < actualStart) {
+      return []
+    }
+
+    const teams = await ctx.db
+      .query('teams')
+      .withIndex('by_event', (q) => q.eq('eventId', eventId))
+      .collect()
+
+    const mockSlugs = teams
+      .map((t) => (t as any).chronoplaceSlug as string | undefined)
+      .filter((s): s is string => typeof s === 'string' && shouldUseMockChronoplace(s, true))
+
+    const snapshotLaps = computeSnapshotAt(
+      { actualStart, testModeDivider: (event as any).testModeDivider as number | undefined },
+      virtualNow,
+      mockSlugs,
+    )
+
+    const slugToTeamId = new Map(
+      teams
+        .filter((t) => (t as any).chronoplaceSlug)
+        .map((t) => [(t as any).chronoplaceSlug as string, t._id]),
+    )
+
+    return snapshotLaps.map((lap) => ({
+      ...lap,
+      teamId: slugToTeamId.get(lap.teamSlug) ?? lap.teamSlug,
+      source: 'mock_snapshot' as const,
+    }))
   },
 })
 
