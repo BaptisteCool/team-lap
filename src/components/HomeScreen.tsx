@@ -306,7 +306,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             </span>
           </div>
           <div className="card-body">
-            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} />
+            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} instantUpdate={testMode && !isLive} />
             {testMode && raceStarted && (
               <TestModeTimelapseSlider
                 testMode={testMode}
