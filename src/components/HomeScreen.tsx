@@ -1,9 +1,11 @@
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '../convex/hooks'
+import { useVirtualClock } from '../hooks/useVirtualClock'
 import { fmtClock, fmtKmPace, kmPaceToLapMs, TEAM_COLOR_PALETTE } from '../lib/race-data'
 import { GpxMap } from './GpxMap'
 import { TestModeBadge } from './TestModeBadge'
+import { TestModeTimelapseSlider } from './TestModeTimelapseSlider'
 
 interface Runner {
   id: string
@@ -41,10 +43,11 @@ interface HomeScreenProps {
 export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   const navigate = useNavigate()
   const [now, setNow] = useState(Date.now())
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 250)
-    return () => clearInterval(id)
+    intervalRef.current = setInterval(() => setNow(Date.now()), 250)
+    return () => clearInterval(intervalRef.current!)
   }, [])
 
   // Aggressive autoTick on Home so checkpoint crossings fire near real-time.
@@ -108,19 +111,46 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
     event?._id ? { eventId: event._id } : 'skip',
   ) as any[] | null | undefined
 
+  // Virtual clock for testMode scrubbing
+  const testMode = (event as any)?.testMode === true
+  const startTime = event?.actualStart ?? Date.now()
+  const testModeDivider = (event as any)?.testModeDivider || 3
+  const { virtualNow, setVirtualNow, isLive, goLive } = useVirtualClock(startTime, testModeDivider)
+
+  // effectiveNow: virtualNow in testMode (scrub), real now otherwise
+  const effectiveNow = testMode ? virtualNow : now
+
   const raceStarted = event?.status === 'running'
   const raceStartTime = event?.actualStart || null
-  const elapsedMs = raceStarted && raceStartTime ? Math.max(0, now - raceStartTime) : 0
+  const elapsedMs = raceStarted && raceStartTime ? Math.max(0, effectiveNow - raceStartTime) : 0
 
-  // Index laps per team
-  const lapsByTeam = new Map<string, any[]>()
-  if (allLaps) {
-    for (const l of allLaps) {
-      if (!lapsByTeam.has(l.teamId)) lapsByTeam.set(l.teamId, [])
-      lapsByTeam.get(l.teamId)!.push(l)
+  // Laps filtered by virtualNow in testMode — memoised for performance
+  const filteredLaps = useMemo(() => {
+    if (!allLaps) return null
+    if (!testMode) return allLaps
+    return allLaps.filter((l: any) => l.timestamp <= virtualNow)
+  }, [allLaps, testMode, virtualNow])
+
+  // Relay ticks: timestamps of relay laps for the slider ticks
+  const relayTicks = useMemo<number[]>(() => {
+    if (!allLaps) return []
+    return allLaps
+      .filter((l: any) => l.type === 'relay_manual' || l.type === 'relay_auto')
+      .map((l: any) => l.timestamp as number)
+      .sort((a: number, b: number) => a - b)
+  }, [allLaps])
+
+  // Index laps per team (from filteredLaps)
+  const lapsByTeam = useMemo(() => {
+    const map = new Map<string, any[]>()
+    if (filteredLaps) {
+      for (const l of filteredLaps) {
+        if (!map.has(l.teamId)) map.set(l.teamId, [])
+        map.get(l.teamId)!.push(l)
+      }
     }
-  }
-
+    return map
+  }, [filteredLaps])
 
   // Resolve current runner from DB currentIdx (matches server state — advances on manual relay)
   function getDbCurrentRunner(t: TeamFull): Runner | null {
@@ -133,17 +163,13 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
     return t.runners.find((r) => r.id === id) || t.runners[0]
   }
 
-  const markers = (teams || [])
+  const markers = useMemo(() => (teams || [])
     .filter(t => t.ready)
     .map(t => {
       const tLaps = (lapsByTeam.get(t._id) || []).filter((l) => l.type !== 'position').slice().sort((a, b) => a.timestamp - b.timestamp)
       const lastLap = tLaps.length ? tLaps[tLaps.length - 1] : null
       const lastLapAt = lastLap ? lastLap.timestamp : raceStartTime
       const dbCurrent = getDbCurrentRunner(t)
-      // Marker position uses Chronoplace's authoritative lapTime when available
-      // (preferred) — the previous lap's duration predicts the current lap. For a
-      // relay lap, strip the 5s handover penalty since that's baked into the previous
-      // lap's lapTime but doesn't apply to the new runner now on track.
       const relayTransitionMs = ((event as any)?.relayTransitionSec ?? 5) * 1000
       const minLapMsHome = (event?.minLapSec ?? 5) * 1000
       const maxLapMsHome = (event?.maxLapSec ?? 3600) * 1000
@@ -152,7 +178,6 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
       const compress = evTestMode && evTestDivider > 0 ? evTestDivider : 1
       const lapDistHome = (event as any)?.lapDistance || 900
       const expectedLapMs = (() => {
-        // Priorité 0: nextExpectedLapMs (API connue à l'avance pour le tour en cours)
         const peek = (t as any).nextExpectedLapMs
         if (peek && peek > 0) return peek
         if (lastLap && lastLap.lapTime > 0) {
@@ -160,7 +185,6 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
           const adjusted = wasRelay ? Math.max(1000, lastLap.lapTime - relayTransitionMs) : lastLap.lapTime
           return adjusted
         }
-        // No lap yet — fallback static, compressed in test mode pour matcher cadence mock
         let baseMs: number
         if (!dbCurrent) baseMs = kmPaceToLapMs(6, 0, lapDistHome)
         else if (dbCurrent.liveKmMin != null && dbCurrent.liveKmSec != null) {
@@ -173,8 +197,6 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
         }
         return baseMs / compress
       })()
-      // Start-line offset: si firstLapDistanceM < lapDistance, le marker démarre
-      // à (lapDist - firstLap)/lapDist du chrono (la ligne de départ est en amont du chrono).
       const firstLapDistHome = (event as any)?.firstLapDistanceM || lapDistHome
       const startOffset = firstLapDistHome > 0 && firstLapDistHome < lapDistHome
         ? (lapDistHome - firstLapDistHome) / lapDistHome
@@ -183,32 +205,22 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
       const inHandoverWindow = false
       const handoverRemainingSec = 0
       if (raceStarted && lastLapAt && expectedLapMs > 0) {
-        const elapsedSinceLast = now - lastLapAt
+        const elapsedSinceLast = effectiveNow - lastLapAt
         if (tLaps.length === 0 && startOffset > 0) {
-          // Avant le 1er tour: marker démarre à startOffset et atteint chrono (1.0)
-          // en EXACTEMENT expectedLapMs (= peek mock du tour 1, qui est déjà la durée
-          // réelle du 1er tour 800m, pas besoin de ratio firstLap/lap).
-          const t = Math.min(1, elapsedSinceLast / expectedLapMs)
-          progress = (startOffset + t * (1 - startOffset)) % 1
+          const tFrac = Math.min(1, elapsedSinceLast / expectedLapMs)
+          progress = (startOffset + tFrac * (1 - startOffset)) % 1
         } else {
           progress = (elapsedSinceLast / expectedLapMs) % 1
         }
         if (progress < 0) progress = 0
       }
-      // Freeze marker just before line when team's cron is paused (runner stopped)
       if (t.autoPaused) progress = 0.92
-      // Team finished → marker frozen on line (sportive end)
       if ((t as any).finishedAt) progress = 1
-      // Sublabel: 2 cas
-      // - Coureur connu (équipe configurée) → "Nom4 M'SS X/N"
-      // - Aucun coureur attribué (équipe chronoplace sans roster) → "M'SS" depuis lastLap (pace brute)
       let subLabel: string | undefined
-      const testMode = (event as any)?.testMode === true
       const testDivider = (event as any)?.testModeDivider || 3
       const paceMul = testMode && testDivider > 0 ? testDivider : 1
       if (dbCurrent && !(t as any).finishedAt) {
         const nameShort = (dbCurrent.name || '').slice(0, 4)
-        // Compte tours du stint courant (depuis dernier relai)
         let lapsThisStint = 0
         for (let i = tLaps.length - 1; i >= 0; i--) {
           const l = tLaps[i]
@@ -221,8 +233,6 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
           : `${lapsThisStint + 1}`
         const currentLapNumber = (typeof lastLap?.lapNumber === 'number' ? lastLap.lapNumber : 0) + 1
         const extras: string[] = [`T${currentLapNumber}`]
-        // Temps + allure du tour EN COURS (= nextExpectedLapMs API mock) en priorité,
-        // sinon fallback sur lastLap (= tour précédent, approximation pour API réelle).
         const refLapMsRunner = (t as any).nextExpectedLapMs || lastLap?.lapTime || 0
         if (refLapMsRunner > 0) {
           const realLapMs = refLapMsRunner * paceMul
@@ -236,7 +246,6 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
           extras.push(`${pm}'${String(ps).padStart(2, '0')}/km`)
         }
         if (lastLap && typeof (lastLap as any).rang === 'number') extras.push(`R${(lastLap as any).rang}`)
-        // Test mode: id chronoplace du tour EN COURS (= nextExpected, pas du précédent)
         const currentChronoId = (t as any).nextExpectedChronoplaceId
           ?? ((lastLap as any)?.chronoplaceId)
         if (evTestMode && typeof currentChronoId === 'number') {
@@ -244,15 +253,12 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
         }
         subLabel = `${nameShort} ${lapsTxt} · ${extras.join(' · ')}`
       } else if (!(t as any).finishedAt) {
-        // Pas de coureur attribué — affiche tour en cours + temps au tour + allure/km + rang
         const lastLapHere = tLaps.length > 0 ? tLaps[tLaps.length - 1] : null
-        // Priorité au tour EN COURS (nextExpectedLapMs API mock) plutôt que précédent
         const refLapMs = (t as any).nextExpectedLapMs || lastLapHere?.lapTime || 0
         const parts: string[] = []
         const currentLapNumber = (typeof lastLapHere?.lapNumber === 'number' ? lastLapHere.lapNumber : 0) + 1
         parts.push(`T${currentLapNumber}`)
         if (refLapMs > 0) {
-          // Temps tour réel (décompressé via paceMul) + allure /km
           const realLapMs = refLapMs * paceMul
           const totalSec = Math.round(realLapMs / 1000)
           const lm = Math.floor(totalSec / 60)
@@ -283,7 +289,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             : (t.name || ''),
         subLabel,
       }
-    })
+    }), [teams, lapsByTeam, raceStarted, raceStartTime, effectiveNow, event, testMode])
 
   return (
     <div className="page">
@@ -301,6 +307,17 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
           </div>
           <div className="card-body">
             <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} />
+            {testMode && raceStarted && (
+              <TestModeTimelapseSlider
+                testMode={testMode}
+                startTime={startTime}
+                virtualNow={virtualNow}
+                setVirtualNow={setVirtualNow}
+                isLive={isLive}
+                goLive={goLive}
+                relayTicks={relayTicks}
+              />
+            )}
           </div>
         </div>
 
