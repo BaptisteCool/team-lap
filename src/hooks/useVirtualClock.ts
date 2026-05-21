@@ -89,7 +89,8 @@ export function useVirtualClock(
       const clamped = Math.max(startTime, Math.min(maxBound, t))
       const ms = clamped - startTime
       setSliderMs(ms)
-      const live = clamped >= now - 1000
+      // Live only when clamped is within 1s of real now (both directions)
+      const live = Math.abs(clamped - now) <= 1000
       setIsLive(live)
       // Drag pauses playback (user takes control)
       if (!live) setIsPlaying(false)

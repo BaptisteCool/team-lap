@@ -97,6 +97,14 @@ export const Route = createRootRoute({
             Accueil
           </Link>
 
+          <Link
+            to="/demo"
+            className="btn ghost"
+            style={{ color: 'var(--accent)', borderColor: 'var(--accent)' }}
+          >
+            Démo
+          </Link>
+
           <div className="live-pill">
             <span className="live-dot"></span>
             <span>Stand‑by</span>

@@ -10,17 +10,26 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SuperAdminRouteImport } from './routes/super-admin'
+import { Route as DemoRouteImport } from './routes/demo'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DemoIndexRouteImport } from './routes/demo.index'
 import { Route as TeamTeamIdRouteImport } from './routes/team.$teamId'
 import { Route as EventEventSlugRouteImport } from './routes/event.$eventSlug'
+import { Route as DemoAdminRouteImport } from './routes/demo.admin'
 import { Route as EventEventSlugIndexRouteImport } from './routes/event.$eventSlug.index'
 import { Route as EventEventSlugAdminRouteImport } from './routes/event.$eventSlug.admin'
+import { Route as DemoTeamTeamIdRouteImport } from './routes/demo.team.$teamId'
 import { Route as EventEventSlugTeamTeamIdRouteImport } from './routes/event.$eventSlug.team.$teamId'
 
 const SuperAdminRoute = SuperAdminRouteImport.update({
   id: '/super-admin',
   path: '/super-admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DemoRoute = DemoRouteImport.update({
+  id: '/demo',
+  path: '/demo',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -33,6 +42,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DemoIndexRoute = DemoIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DemoRoute,
+} as any)
 const TeamTeamIdRoute = TeamTeamIdRouteImport.update({
   id: '/team/$teamId',
   path: '/team/$teamId',
@@ -42,6 +56,11 @@ const EventEventSlugRoute = EventEventSlugRouteImport.update({
   id: '/event/$eventSlug',
   path: '/event/$eventSlug',
   getParentRoute: () => rootRouteImport,
+} as any)
+const DemoAdminRoute = DemoAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => DemoRoute,
 } as any)
 const EventEventSlugIndexRoute = EventEventSlugIndexRouteImport.update({
   id: '/',
@@ -53,6 +72,11 @@ const EventEventSlugAdminRoute = EventEventSlugAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => EventEventSlugRoute,
 } as any)
+const DemoTeamTeamIdRoute = DemoTeamTeamIdRouteImport.update({
+  id: '/team/$teamId',
+  path: '/team/$teamId',
+  getParentRoute: () => DemoRoute,
+} as any)
 const EventEventSlugTeamTeamIdRoute =
   EventEventSlugTeamTeamIdRouteImport.update({
     id: '/team/$teamId',
@@ -63,9 +87,13 @@ const EventEventSlugTeamTeamIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/demo': typeof DemoRouteWithChildren
   '/super-admin': typeof SuperAdminRoute
+  '/demo/admin': typeof DemoAdminRoute
   '/event/$eventSlug': typeof EventEventSlugRouteWithChildren
   '/team/$teamId': typeof TeamTeamIdRoute
+  '/demo/': typeof DemoIndexRoute
+  '/demo/team/$teamId': typeof DemoTeamTeamIdRoute
   '/event/$eventSlug/admin': typeof EventEventSlugAdminRoute
   '/event/$eventSlug/': typeof EventEventSlugIndexRoute
   '/event/$eventSlug/team/$teamId': typeof EventEventSlugTeamTeamIdRoute
@@ -74,7 +102,10 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/super-admin': typeof SuperAdminRoute
+  '/demo/admin': typeof DemoAdminRoute
   '/team/$teamId': typeof TeamTeamIdRoute
+  '/demo': typeof DemoIndexRoute
+  '/demo/team/$teamId': typeof DemoTeamTeamIdRoute
   '/event/$eventSlug/admin': typeof EventEventSlugAdminRoute
   '/event/$eventSlug': typeof EventEventSlugIndexRoute
   '/event/$eventSlug/team/$teamId': typeof EventEventSlugTeamTeamIdRoute
@@ -83,9 +114,13 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/demo': typeof DemoRouteWithChildren
   '/super-admin': typeof SuperAdminRoute
+  '/demo/admin': typeof DemoAdminRoute
   '/event/$eventSlug': typeof EventEventSlugRouteWithChildren
   '/team/$teamId': typeof TeamTeamIdRoute
+  '/demo/': typeof DemoIndexRoute
+  '/demo/team/$teamId': typeof DemoTeamTeamIdRoute
   '/event/$eventSlug/admin': typeof EventEventSlugAdminRoute
   '/event/$eventSlug/': typeof EventEventSlugIndexRoute
   '/event/$eventSlug/team/$teamId': typeof EventEventSlugTeamTeamIdRoute
@@ -95,9 +130,13 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/demo'
     | '/super-admin'
+    | '/demo/admin'
     | '/event/$eventSlug'
     | '/team/$teamId'
+    | '/demo/'
+    | '/demo/team/$teamId'
     | '/event/$eventSlug/admin'
     | '/event/$eventSlug/'
     | '/event/$eventSlug/team/$teamId'
@@ -106,7 +145,10 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/super-admin'
+    | '/demo/admin'
     | '/team/$teamId'
+    | '/demo'
+    | '/demo/team/$teamId'
     | '/event/$eventSlug/admin'
     | '/event/$eventSlug'
     | '/event/$eventSlug/team/$teamId'
@@ -114,9 +156,13 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/demo'
     | '/super-admin'
+    | '/demo/admin'
     | '/event/$eventSlug'
     | '/team/$teamId'
+    | '/demo/'
+    | '/demo/team/$teamId'
     | '/event/$eventSlug/admin'
     | '/event/$eventSlug/'
     | '/event/$eventSlug/team/$teamId'
@@ -125,6 +171,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  DemoRoute: typeof DemoRouteWithChildren
   SuperAdminRoute: typeof SuperAdminRoute
   EventEventSlugRoute: typeof EventEventSlugRouteWithChildren
   TeamTeamIdRoute: typeof TeamTeamIdRoute
@@ -137,6 +184,13 @@ declare module '@tanstack/react-router' {
       path: '/super-admin'
       fullPath: '/super-admin'
       preLoaderRoute: typeof SuperAdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/demo': {
+      id: '/demo'
+      path: '/demo'
+      fullPath: '/demo'
+      preLoaderRoute: typeof DemoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -153,6 +207,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/demo/': {
+      id: '/demo/'
+      path: '/'
+      fullPath: '/demo/'
+      preLoaderRoute: typeof DemoIndexRouteImport
+      parentRoute: typeof DemoRoute
+    }
     '/team/$teamId': {
       id: '/team/$teamId'
       path: '/team/$teamId'
@@ -166,6 +227,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/event/$eventSlug'
       preLoaderRoute: typeof EventEventSlugRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/demo/admin': {
+      id: '/demo/admin'
+      path: '/admin'
+      fullPath: '/demo/admin'
+      preLoaderRoute: typeof DemoAdminRouteImport
+      parentRoute: typeof DemoRoute
     }
     '/event/$eventSlug/': {
       id: '/event/$eventSlug/'
@@ -181,6 +249,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EventEventSlugAdminRouteImport
       parentRoute: typeof EventEventSlugRoute
     }
+    '/demo/team/$teamId': {
+      id: '/demo/team/$teamId'
+      path: '/team/$teamId'
+      fullPath: '/demo/team/$teamId'
+      preLoaderRoute: typeof DemoTeamTeamIdRouteImport
+      parentRoute: typeof DemoRoute
+    }
     '/event/$eventSlug/team/$teamId': {
       id: '/event/$eventSlug/team/$teamId'
       path: '/team/$teamId'
@@ -190,6 +265,20 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface DemoRouteChildren {
+  DemoAdminRoute: typeof DemoAdminRoute
+  DemoIndexRoute: typeof DemoIndexRoute
+  DemoTeamTeamIdRoute: typeof DemoTeamTeamIdRoute
+}
+
+const DemoRouteChildren: DemoRouteChildren = {
+  DemoAdminRoute: DemoAdminRoute,
+  DemoIndexRoute: DemoIndexRoute,
+  DemoTeamTeamIdRoute: DemoTeamTeamIdRoute,
+}
+
+const DemoRouteWithChildren = DemoRoute._addFileChildren(DemoRouteChildren)
 
 interface EventEventSlugRouteChildren {
   EventEventSlugAdminRoute: typeof EventEventSlugAdminRoute
@@ -210,6 +299,7 @@ const EventEventSlugRouteWithChildren = EventEventSlugRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  DemoRoute: DemoRouteWithChildren,
   SuperAdminRoute: SuperAdminRoute,
   EventEventSlugRoute: EventEventSlugRouteWithChildren,
   TeamTeamIdRoute: TeamTeamIdRoute,

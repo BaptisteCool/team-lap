@@ -31,6 +31,9 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers, ma
   const seenIdsRef = useRef<Set<string>>(new Set())
   const [, setSeenVersion] = useState(0)
   const [singleSeen, setSingleSeen] = useState(false)
+  // Per-marker last progress — detect lap wrap (progress decreasing significantly) to skip transition
+  const lastProgressRef = useRef<Map<string, number>>(new Map())
+  const wrappedIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     if (progress == null || !pathRef.current) {
@@ -54,11 +57,17 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers, ma
       return
     }
     const len = pathRef.current.getTotalLength()
+    const wrapped = new Set<string>()
     const computed = markers.map(mk => {
       const p = ((mk.progress % 1) + 1) % 1
+      const prev = lastProgressRef.current.get(mk.id)
+      // Detect lap wrap: progress jumped backward by > 0.5 → completed a lap
+      if (prev != null && prev - p > 0.5) wrapped.add(mk.id)
+      lastProgressRef.current.set(mk.id, p)
       const pt = pathRef.current!.getPointAtLength(len * p)
       return { ...mk, x: pt.x, y: pt.y }
     })
+    wrappedIdsRef.current = wrapped
     setComputedMulti(computed)
     // Mark new ids as seen on next frame so first paint skips transition
     const newIds = computed.filter((mk) => !seenIdsRef.current.has(mk.id)).map((mk) => mk.id)
@@ -124,11 +133,13 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers, ma
           )}
           {computedMulti.map(mk => {
             const seen = seenIdsRef.current.has(mk.id)
+            const wrapped = wrappedIdsRef.current.has(mk.id)
+            const noTransition = instantUpdate || wrapped || !seen
             return (
               <g
                 key={mk.id}
                 transform={`translate(${mk.x} ${mk.y})`}
-                style={{ transition: instantUpdate ? 'none' : (seen ? 'transform 1s linear' : 'none') }}
+                style={{ transition: noTransition ? 'none' : 'transform 1s linear' }}
               >
                 <circle r="10" fill={mk.color} opacity="0.18" />
                 <circle r="5.5" fill={mk.color} stroke="var(--bg)" strokeWidth="2" />

@@ -403,3 +403,139 @@ export const seedAll = mutation({
     }
   },
 })
+
+// Seed isolated demo event (idempotent). Same team structure (same chronoplaceSlugs
+// so mock Chronoplace data resolves) but a distinct slug + organization so it never
+// touches real archived events. Demo routes (/demo, /demo/admin, /demo/team/$teamId)
+// consume this event.
+export const seedDemoEvent = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const slug = 'demo-mock-event'
+    const existing = await ctx.db
+      .query('events')
+      .withIndex('by_slug', (q) => q.eq('slug', slug))
+      .first()
+    if (existing) {
+      return { skipped: true, eventId: existing._id, reason: 'already seeded' }
+    }
+
+    const orgId = await ctx.db.insert('organizations', {
+      name: 'Demo Sandbox',
+      slug: 'demo-sandbox',
+      createdAt: Date.now(),
+    })
+
+    const eventId = await createEventWithDefaults(ctx, {
+      organizationId: orgId,
+      name: 'Démo · Course 24h mock',
+      slug,
+      scheduledStart: new Date('2026-05-16T14:00:00+02:00').getTime(),
+      scheduledEnd: new Date('2026-05-17T14:00:00+02:00').getTime(),
+      lapDistance: 900,
+      raceDuration: 24 * 3600 * 1000,
+      adminPassword: 'demo',
+      superAdminPin: '000000',
+    })
+    await ctx.db.patch(eventId, {
+      testMode: true,
+      relayTransitionSec: 5,
+      lateGraceSec: 45,
+      cityName: 'Brette-les-Pins',
+      latitude: 47.9133,
+      longitude: 0.33765,
+      firstLapDistanceM: 800,
+      updatedAt: Date.now(),
+    })
+
+    // Heroes Academy (configured team with runners + order)
+    const runnersTemplate: Array<{
+      name: string
+      kmMin: number
+      kmSec: number
+      plannedLaps: number
+      color: string
+      theoreticalRelayPaceMin?: number
+      theoreticalRelayPaceSec?: number
+    }> = [
+      { name: 'Simon',     kmMin: 5, kmSec: 0,  plannedLaps: 6, color: '#A6F060', theoreticalRelayPaceMin: 4, theoreticalRelayPaceSec: 40 },
+      { name: 'Martial',   kmMin: 5, kmSec: 30, plannedLaps: 5, color: '#60D9F0', theoreticalRelayPaceMin: 4, theoreticalRelayPaceSec: 52 },
+      { name: 'Charlotte', kmMin: 6, kmSec: 15, plannedLaps: 4, color: '#F06080', theoreticalRelayPaceMin: 6, theoreticalRelayPaceSec: 17 },
+      { name: 'Baptiste',  kmMin: 4, kmSec: 45, plannedLaps: 6, color: '#F0A860', theoreticalRelayPaceMin: 4, theoreticalRelayPaceSec: 35 },
+      { name: 'Marina',    kmMin: 6, kmSec: 45, plannedLaps: 4, color: '#D060F0', theoreticalRelayPaceMin: 6, theoreticalRelayPaceSec: 25 },
+      { name: 'Marc',      kmMin: 5, kmSec: 30, plannedLaps: 5, color: '#F0E060', theoreticalRelayPaceMin: 5, theoreticalRelayPaceSec: 35 },
+      { name: 'Théo',      kmMin: 5, kmSec: 0,  plannedLaps: 6, color: '#60F0C0', theoreticalRelayPaceMin: 5, theoreticalRelayPaceSec: 6 },
+      { name: 'Lucie',     kmMin: 6, kmSec: 0,  plannedLaps: 4, color: '#F060C0', theoreticalRelayPaceMin: 5, theoreticalRelayPaceSec: 39 },
+      { name: 'Pascal',    kmMin: 4, kmSec: 20, plannedLaps: 12, color: '#6080F0', theoreticalRelayPaceMin: 4, theoreticalRelayPaceSec: 16 },
+    ]
+
+    const teamId = await ctx.db.insert('teams', {
+      eventId,
+      name: 'Heroes Academy',
+      category: 'Mixte',
+      color: '#60D9F0',
+      maxRunners: 9,
+      goalLaps: 300,
+      pin: '0000',
+      ready: true,
+      currentIdx: 0,
+      chronoplaceSlug: 'heroes-academy',
+      dossard: '8',
+      chronoSyncEnabled: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+
+    const localRunnerIds: string[] = []
+    const now = Date.now()
+    for (let i = 0; i < runnersTemplate.length; i++) {
+      const r = runnersTemplate[i]
+      const localId = `r${now}_${i}_${r.name.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')}`
+      await ctx.db.insert('runners', {
+        teamId,
+        name: r.name,
+        id: localId,
+        kmMin: r.kmMin,
+        kmSec: r.kmSec,
+        energy: 100,
+        plannedLaps: r.plannedLaps,
+        color: r.color,
+        status: 'ready',
+        theoreticalRelayPaceMin: r.theoreticalRelayPaceMin,
+        theoreticalRelayPaceSec: r.theoreticalRelayPaceSec,
+        createdAt: now,
+      })
+      localRunnerIds.push(localId)
+    }
+    await ctx.db.insert('teamOrder', { teamId, order: localRunnerIds })
+
+    // Other mock teams (no runners, mock laps via chronoplace mock)
+    const otherTeams = [
+      { name: "Les Licornes ça n'existe pas", color: '#F060A0', pin: '0001', dossard: '26', chronoplaceSlug: "les-licornes-ca-n'existe-pas" },
+      { name: 'F2tards Endurants', color: '#F0C040', pin: '0002', dossard: '7', chronoplaceSlug: 'f2tards-endurants' },
+      { name: 'Aiglehoux et compagnie', color: '#80C0F0', pin: '0003', dossard: '5', chronoplaceSlug: 'aiglehoux-et-compagnie' },
+    ]
+    const otherTeamIds: any[] = []
+    for (const ot of otherTeams) {
+      const otId = await ctx.db.insert('teams', {
+        eventId,
+        name: ot.name,
+        category: 'Mixte',
+        color: ot.color,
+        maxRunners: 0,
+        goalLaps: 280,
+        pin: ot.pin,
+        ready: true,
+        currentIdx: 0,
+        chronoplaceSlug: ot.chronoplaceSlug,
+        dossard: ot.dossard,
+        chronoSyncEnabled: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      otherTeamIds.push(otId)
+    }
+
+    return { skipped: false, orgId, eventId, teamIds: [teamId, ...otherTeamIds] }
+  },
+})
