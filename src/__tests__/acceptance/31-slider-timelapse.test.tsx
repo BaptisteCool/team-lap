@@ -23,16 +23,6 @@ import React from 'react'
 // Supprimer ces mocks apres implementation (GREEN).
 // ---------------------------------------------------------------------------
 
-vi.mock('../../hooks/useVirtualClock', () => ({
-  // Stub minimaliste — retourne des valeurs neutres qui feront echouer les assertions
-  useVirtualClock: (_startTime: number, _divider?: number) => ({
-    virtualNow: 0,          // Wrong: devrait etre ~Date.now()
-    setVirtualNow: vi.fn(), // Wrong: ne met pas a jour virtualNow
-    isLive: false,          // Wrong: devrait etre true au montage
-    goLive: vi.fn(),        // Wrong: ne reset pas a Date.now()
-  }),
-}))
-
 vi.mock('../../components/TestModeTimelapseSlider', () => ({
   // Stub — rend null inconditionnellement (pas de slider, pas de ticks, pas de boutons)
   TestModeTimelapseSlider: () => null,
