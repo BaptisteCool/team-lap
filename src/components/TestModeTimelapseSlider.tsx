@@ -5,6 +5,12 @@ export type RelayTickInput =
   | number
   | { timestamp: number; teamName?: string; runnerName?: string; teamColor?: string; teamId?: string }
 
+export type TeamFilterOption = {
+  id: string
+  name: string
+  color: string
+}
+
 export type TestModeTimelapseSliderProps = {
   testMode: boolean
   startTime: number
@@ -21,6 +27,11 @@ export type TestModeTimelapseSliderProps = {
   futureOffsetMs?: number
   isLoadingFuture?: boolean
   futureError?: Error | null
+  teamFilterOptions?: TeamFilterOption[]
+  selectedTeamIds?: Set<string>
+  onToggleTeam?: (id: string) => void
+  onClearTeams?: () => void
+  maxSelectedTeams?: number
 }
 
 type DerivedTick = {
@@ -66,6 +77,11 @@ export function TestModeTimelapseSlider({
   goLive,
   isPlaying = false,
   togglePlay,
+  teamFilterOptions,
+  selectedTeamIds,
+  onToggleTeam,
+  onClearTeams,
+  maxSelectedTeams = 3,
   relayTicks,
   snapToTicks = true,
   isFuture = false,
@@ -240,6 +256,35 @@ export function TestModeTimelapseSlider({
         >
           {formatHHmm(virtualNow)}
         </time>
+
+        {teamFilterOptions && teamFilterOptions.length > 0 && onToggleTeam && (
+          <div className="time-scrubber-teams" role="group" aria-label="Filtre equipes">
+            {teamFilterOptions.map((opt) => {
+              const active = selectedTeamIds?.has(opt.id) ?? false
+              const disabled = !active && (selectedTeamIds?.size ?? 0) >= maxSelectedTeams
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={`team-filter-chip${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
+                  onClick={() => { if (!disabled) onToggleTeam(opt.id) }}
+                  disabled={disabled}
+                  aria-pressed={active}
+                  style={{ ['--chip-color' as any]: opt.color }}
+                  title={`${opt.name}${disabled ? ' (max 3 selectionnees)' : ''}`}
+                >
+                  <span className="team-filter-dot" />
+                  <span className="team-filter-name">{opt.name}</span>
+                </button>
+              )
+            })}
+            {(selectedTeamIds?.size ?? 0) > 0 && onClearTeams && (
+              <button type="button" className="team-filter-clear" onClick={onClearTeams}>
+                Tout
+              </button>
+            )}
+          </div>
+        )}
 
         <div className="time-scrubber-zoom" role="group" aria-label="Zoom temporel">
           {ZOOM_LEVELS.map((z) => (

@@ -377,6 +377,11 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
                   goLive={goLive}
                   isPlaying={isPlaying}
                   togglePlay={togglePlay}
+                  teamFilterOptions={(teams ?? []).map(t => ({ id: t._id, name: t.name, color: t.color || '#A6F060' }))}
+                  selectedTeamIds={selectedTeamIds}
+                  onToggleTeam={toggleTeam}
+                  onClearTeams={() => setSelectedTeamIds(new Set())}
+                  maxSelectedTeams={MAX_SELECTED_TEAMS}
                   relayTicks={relayTicks}
                   isFuture={isFuture}
                   futureOffsetMs={Math.max(0, virtualNow - Date.now())}
@@ -414,41 +419,6 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             {!teams || teams.length === 0 && <div className="empty">Aucune équipe enregistrée.</div>}
             {teams && teams.length > 0 && (
               <>
-                <div className="team-filter">
-                  <span className="team-filter-label">
-                    Filtre carte {selectedTeamIds.size > 0 ? `(${selectedTeamIds.size}/${MAX_SELECTED_TEAMS})` : '— toutes affichées'}
-                  </span>
-                  <div className="team-filter-chips">
-                    {teams.map((t) => {
-                      const active = selectedTeamIds.has(t._id)
-                      const disabled = !active && selectedTeamIds.size >= MAX_SELECTED_TEAMS
-                      return (
-                        <button
-                          key={t._id}
-                          type="button"
-                          className={`team-filter-chip${active ? ' is-active' : ''}${disabled ? ' is-disabled' : ''}`}
-                          onClick={(e) => { e.stopPropagation(); if (!disabled) toggleTeam(t._id) }}
-                          disabled={disabled}
-                          aria-pressed={active}
-                          style={{ '--chip-color': t.color || 'var(--accent)' } as React.CSSProperties}
-                          title={`${t.name}${disabled ? ' (max 3 selectionnees)' : ''}`}
-                        >
-                          <span className="team-filter-dot" />
-                          <span className="team-filter-name">{t.name}</span>
-                        </button>
-                      )
-                    })}
-                    {selectedTeamIds.size > 0 && (
-                      <button
-                        type="button"
-                        className="team-filter-clear"
-                        onClick={() => setSelectedTeamIds(new Set())}
-                      >
-                        Tout afficher
-                      </button>
-                    )}
-                  </div>
-                </div>
                 <div className="grid" style={{ gap: 10, gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
                 {teams.map(t => {
                   const current = getDbCurrentRunner(t)
