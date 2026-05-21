@@ -37,12 +37,26 @@ interface TeamFull {
   order: string[]
 }
 
+export type SimulationOverride = {
+  status?: string
+  actualStart?: number | null
+  actualEnd?: number | null
+  laps?: any[]
+  endTimeOverride?: number
+  finishedAtOverride?: number
+  onStart?: () => void
+  onEnd?: () => void
+  onRestart?: () => void
+  hideAdminButton?: boolean
+}
+
 interface HomeScreenProps {
   eventSlug: string
   onPickTeam: (teamId: string) => void
+  simulation?: SimulationOverride
 }
 
-export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
+export function HomeScreen({ eventSlug, onPickTeam, simulation }: HomeScreenProps) {
   const navigate = useNavigate()
   const [now, setNow] = useState(Date.now())
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -63,8 +77,18 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
     return () => clearInterval(id)
   }, [autoTickMutation])
 
-  // Get the event by slug
-  const event = useQuery('events:getBySlug' as any, { slug: eventSlug }) as any
+  // Get the event by slug — overlaid with simulation if provided
+  const eventRaw = useQuery('events:getBySlug' as any, { slug: eventSlug }) as any
+  const event = useMemo(() => {
+    if (!eventRaw) return eventRaw
+    if (!simulation) return eventRaw
+    return {
+      ...eventRaw,
+      status: simulation.status ?? eventRaw.status,
+      actualStart: simulation.actualStart !== undefined ? simulation.actualStart : eventRaw.actualStart,
+      actualEnd: simulation.actualEnd !== undefined ? simulation.actualEnd : eventRaw.actualEnd,
+    }
+  }, [eventRaw, simulation])
 
   // Presence heartbeat — required to keep server-side burst chain alive
   // (scheduleNextAutoBurst exits early when hasViewers === false).
@@ -108,18 +132,30 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   ) as TeamFull[] | null | undefined
 
   // All laps for the event (used to compute live progress on map)
-  const allLaps = useQuery(
+  const allLapsConvex = useQuery(
     'laps:getLapsByEvent' as any,
     event?._id ? { eventId: event._id } : 'skip',
   ) as any[] | null | undefined
+  const allLaps = simulation?.laps ?? allLapsConvex
 
   // Virtual clock for testMode scrubbing
   const testMode = (event as any)?.testMode === true
   const startTime = event?.actualStart ?? Date.now()
   const testModeDivider = (event as any)?.testModeDivider || 3
   const raceDurationMs = (event as any)?.raceDuration ?? 24 * 3600 * 1000
-  const endTime = startTime + raceDurationMs
+  const endTime = simulation?.endTimeOverride ?? (startTime + raceDurationMs)
   const { virtualNow, setVirtualNow, isLive, goLive, isPlaying, togglePlay } = useVirtualClock(startTime, testModeDivider, { endTime })
+
+  const raceFinished = (event as any)?.status === 'finished'
+
+  // When race transitions to finished, snap virtualNow:
+  //  - simulation: thumb at first team's finish (winner) — user scrubs to see others
+  //  - real event: thumb at endTime (right edge)
+  useEffect(() => {
+    if (!raceFinished) return
+    const target = simulation?.finishedAtOverride ?? endTime
+    setVirtualNow(target)
+  }, [raceFinished, endTime, simulation, setVirtualNow])
 
   const isFuture = testMode && virtualNow > Date.now() + 1000
 
@@ -138,19 +174,23 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   const isJump = testMode && Math.abs(effectiveNow - prevEffectiveNowRef.current) > JUMP_THRESHOLD_MS
   useEffect(() => { prevEffectiveNowRef.current = effectiveNow }, [effectiveNow])
 
-  const raceStarted = event?.status === 'running'
+  const raceStarted = event?.status === 'running' || event?.status === 'finished'
   const raceStartTime = event?.actualStart || null
   const elapsedMs = raceStarted && raceStartTime ? Math.max(0, effectiveNow - raceStartTime) : 0
 
   // Laps filtered by virtualNow in testMode — memoised for performance
   const filteredLaps = useMemo(() => {
     if (!testMode) return allLaps ?? null
+    // Simulation mode: always filter from the locally-provided full schedule.
+    if (simulation?.laps) {
+      return (allLaps ?? []).filter((l: any) => l.timestamp <= virtualNow)
+    }
     if (virtualNow > Date.now() + 1000) {
       return futureLaps ?? (allLaps?.filter((l: any) => l.timestamp <= Date.now()) ?? null)
     }
     if (!allLaps) return null
     return allLaps.filter((l: any) => l.timestamp <= virtualNow)
-  }, [allLaps, testMode, virtualNow, futureLaps])
+  }, [allLaps, testMode, virtualNow, futureLaps, simulation])
 
   // Team filter (max 3 selected). Empty = show all.
   const MAX_SELECTED_TEAMS = 3
@@ -274,6 +314,7 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
       }
       if (t.autoPaused) progress = 0.92
       if ((t as any).finishedAt) progress = 1
+      if (raceFinished) progress = 1
       let subLabel: string | undefined
       const testDivider = (event as any)?.testModeDivider || 3
       const paceMul = testMode && testDivider > 0 ? testDivider : 1
@@ -347,12 +388,27 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             : (t.name || ''),
         subLabel,
       }
-    }), [teams, lapsByTeam, raceStarted, raceStartTime, effectiveNow, event, testMode, selectedTeamIds])
+    }), [teams, lapsByTeam, raceStarted, raceStartTime, effectiveNow, event, testMode, selectedTeamIds, raceFinished, simulation])
 
   return (
     <div className="page">
       <TestModeBadge testMode={(event as any)?.testMode} testModeDivider={(event as any)?.testModeDivider} />
       <div className="grid" style={{ gap: 18, maxWidth: 980, margin: '0 auto' }}>
+        {simulation && (
+          <div className="demo-controls">
+            {simulation.status === 'scheduled' && simulation.onStart && (
+              <button type="button" className="demo-ctrl-btn" onClick={simulation.onStart}>▶ Démarrer</button>
+            )}
+            {(simulation.status === 'running' || simulation.status === 'finished') && simulation.onRestart && (
+              <button type="button" className="demo-ctrl-btn" onClick={simulation.onRestart}>↻ Restart</button>
+            )}
+            {simulation.status === 'running' && simulation.onEnd && (
+              <button type="button" className="demo-ctrl-btn is-danger" onClick={simulation.onEnd}>■ Fin</button>
+            )}
+            <span className="demo-controls-hint">Simulation locale · ta session</span>
+          </div>
+        )}
+
         {/* Carte circuit en haut */}
         <div className="card">
           <div className="card-head">
@@ -398,22 +454,24 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
           <div className="card-head">
             <span>👥</span>
             <h3>Équipes inscrites · {teams?.length || 0}</h3>
-            {/* Discreet admin button */}
-            <button
-              onClick={() => navigate({ to: '/admin' })}
-              style={{
-                marginLeft: 'auto',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                opacity: 0.3,
-                fontSize: 16,
-                padding: 4,
-              }}
-              title="Administration"
-            >
-              ⚙️
-            </button>
+            {!simulation?.hideAdminButton && (
+              /* Discreet admin button */
+              <button
+                onClick={() => navigate({ to: '/admin' })}
+                style={{
+                  marginLeft: 'auto',
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  opacity: 0.3,
+                  fontSize: 16,
+                  padding: 4,
+                }}
+                title="Administration"
+              >
+                ⚙️
+              </button>
+            )}
           </div>
           <div className="card-body">
             {!teams || teams.length === 0 && <div className="empty">Aucune équipe enregistrée.</div>}

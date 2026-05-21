@@ -7,9 +7,12 @@ export const Route = createFileRoute('/')({
   component: IndexPage,
 })
 
+const DEMO_SLUG = 'demo-mock-event'
+
 function IndexPage() {
   const navigate = useNavigate()
-  const events = useQuery('events:list' as any) as any[] | null | undefined
+  const allEvents = useQuery('events:list' as any) as any[] | null | undefined
+  const events = allEvents?.filter((e: any) => e?.slug !== DEMO_SLUG)
 
   useEffect(() => {
     if (!events || events.length !== 1) return

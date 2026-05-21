@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "convex": "npx convex dev --local",
+    "convex": "CONVEX_LOCAL_BACKEND_STARTUP_TIMEOUT_SECS=120 npx convex dev --local",
     "convex:cloud": "npx convex dev",
     "seed": "npx convex run seed:seedAll",
     "seed:convex": "npx convex dev --local --once && npm run seed",
