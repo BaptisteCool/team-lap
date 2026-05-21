@@ -319,16 +319,20 @@ describe('[Feat] #32 — HomeScreen: getMockSnapshotAt appellee quand virtualNow
     // RED : cet expect echoue car HomeScreen ne fait pas cet appel actuellement
   })
 
-  test('AC9: quand virtualNow <= Date.now(), getMockSnapshotAt N\'est PAS appelee', async () => {
+  test('AC9: quand virtualNow <= Date.now(), getMockSnapshotAt utilise args=skip (no network)', async () => {
     const { HomeScreen } = await import('../../components/HomeScreen')
 
     render(<HomeScreen eventSlug="heroes-2026" onPickTeam={vi.fn()} />)
 
-    // En etat initial (isLive=true, virtualNow ~ Date.now()), pas d'appel futur
-    const calls = useQueryMock.mock.calls.map((c: any[]) => c[0])
-    expect(calls).not.toContain('chronoplace:getMockSnapshotAt')
-    // GREEN-compat: HomeScreen n'appelle pas cette query aujourd'hui donc ce test passe
-    // mais doit continuer a passer apres implementation (guard correct)
+    // useQuery est appele inconditionnellement (regle hooks React) mais avec args='skip'
+    // quand virtualNow <= Date.now() — Convex ne declenche aucune requete reseau dans ce cas.
+    const snapshotCalls = useQueryMock.mock.calls.filter(
+      (c: any[]) => c[0] === 'chronoplace:getMockSnapshotAt',
+    )
+    // Si la query est invoquee, ses args doivent etre 'skip' (jamais d'objet args reel)
+    for (const call of snapshotCalls) {
+      expect(call[1]).toBe('skip')
+    }
   })
 
   test('AC6: debounce 100ms — query non declenchee immediatement pendant drag rapide', async () => {
