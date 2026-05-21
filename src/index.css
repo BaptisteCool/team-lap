@@ -371,6 +371,21 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
   font-size: 9px;
   color: var(--muted-2);
 }
+.time-scrubber-tick-team {
+  font-size: 10px;
+  color: var(--text-2);
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.time-scrubber-tick-runner {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
+}
 .time-scrubber-tick.is-active .time-scrubber-tick-line {
   background: var(--accent);
 }

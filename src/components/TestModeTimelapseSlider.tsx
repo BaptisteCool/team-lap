@@ -1,6 +1,10 @@
 import { RotateCcw } from 'lucide-react'
 import React, { useMemo, useState } from 'react'
 
+export type RelayTickInput =
+  | number
+  | { timestamp: number; teamName?: string; runnerName?: string }
+
 export type TestModeTimelapseSliderProps = {
   testMode: boolean
   startTime: number
@@ -9,13 +13,15 @@ export type TestModeTimelapseSliderProps = {
   setVirtualNow: (t: number) => void
   isLive: boolean
   goLive: () => void
-  relayTicks?: number[]
+  relayTicks?: RelayTickInput[]
   snapToTicks?: boolean
 }
 
 type DerivedTick = {
   timestamp: number
   label: string
+  teamName?: string
+  runnerName?: string
 }
 
 type ZoomLevel = { label: string; ms: number | null }
@@ -92,10 +98,18 @@ export function TestModeTimelapseSlider({
 
   const derivedTicks = useMemo<DerivedTick[]>(() => {
     if (!relayTicks || relayTicks.length === 0) return []
-    return relayTicks
+    const normalized = relayTicks.map((t) =>
+      typeof t === 'number' ? { timestamp: t } : t,
+    )
+    return normalized
       .slice()
-      .sort((a, b) => a - b)
-      .map((ts, i) => ({ timestamp: ts, label: `R${i + 1}` }))
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map((t, i) => ({
+        timestamp: t.timestamp,
+        label: `R${i + 1}`,
+        teamName: t.teamName,
+        runnerName: t.runnerName,
+      }))
   }, [relayTicks])
 
   function isNearTick(tick: DerivedTick): boolean {
@@ -268,11 +282,18 @@ export function TestModeTimelapseSlider({
               className={`time-scrubber-tick${isNearTick(tick) ? ' is-active' : ''}`}
               style={{ left: `${tickPct(tick.timestamp)}%` }}
               onClick={() => handleTickClick(tick.timestamp)}
-              aria-label={`Jump au relais ${tick.label} · ${formatHHmm(tick.timestamp)}`}
+              aria-label={`Jump au relais ${tick.label}${tick.teamName ? ` — ${tick.teamName}` : ''}${tick.runnerName ? ` · ${tick.runnerName}` : ''} · ${formatHHmm(tick.timestamp)}`}
+              title={`${tick.label}${tick.teamName ? ` — ${tick.teamName}` : ''}${tick.runnerName ? ` · ${tick.runnerName}` : ''} · ${formatHHmm(tick.timestamp)}`}
               type="button"
             >
               <span className="time-scrubber-tick-line" />
               <span className="time-scrubber-tick-label">{tick.label}</span>
+              {tick.teamName && (
+                <span className="time-scrubber-tick-team">{tick.teamName}</span>
+              )}
+              {tick.runnerName && (
+                <span className="time-scrubber-tick-runner">→ {tick.runnerName}</span>
+              )}
               <span className="time-scrubber-tick-time">{formatHHmm(tick.timestamp)}</span>
             </button>
           ))}

@@ -133,14 +133,31 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
     return allLaps.filter((l: any) => l.timestamp <= virtualNow)
   }, [allLaps, testMode, virtualNow])
 
-  // Relay ticks: timestamps of relay laps for the slider ticks
-  const relayTicks = useMemo<number[]>(() => {
-    if (!allLaps) return []
+  // Relay ticks: timestamps + team + incoming runner (next stint) for the slider ticks
+  const relayTicks = useMemo<Array<{ timestamp: number; teamName: string; runnerName: string }>>(() => {
+    if (!allLaps || !teams) return []
+    const teamMap = new Map<string, TeamFull>(teams.map((t) => [t._id, t]))
     return allLaps
       .filter((l: any) => l.type === 'relay_manual' || l.type === 'relay_auto')
-      .map((l: any) => l.timestamp as number)
-      .sort((a: number, b: number) => a - b)
-  }, [allLaps])
+      .map((l: any) => {
+        const team = teamMap.get(l.teamId)
+        // Incoming runner: order[prevCurrentIdx + 1] mod length (next stint after this relay)
+        const orderArr: string[] = team?.order && team.order.length > 0
+          ? team.order
+          : (team?.runners?.map((r) => r.id) ?? [])
+        const baseIdx = typeof l.prevCurrentIdx === 'number' ? l.prevCurrentIdx : 0
+        const nextRunnerId = orderArr.length > 0
+          ? orderArr[(baseIdx + 1) % orderArr.length]
+          : undefined
+        const nextRunner = team?.runners?.find((r) => r.id === nextRunnerId)
+        return {
+          timestamp: l.timestamp as number,
+          teamName: team?.name ?? '',
+          runnerName: nextRunner?.name ?? '',
+        }
+      })
+      .sort((a, b) => a.timestamp - b.timestamp)
+  }, [allLaps, teams])
 
   // Index laps per team (from filteredLaps)
   const lapsByTeam = useMemo(() => {
