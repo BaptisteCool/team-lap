@@ -19,9 +19,10 @@ interface GpxMapProps {
   markerSubLabel?: string
   markerColor?: string
   lapDistanceM?: number
+  instantUpdate?: boolean
 }
 
-export function GpxMap({ height, marker, progress, showLabel = true, markers, markerLabel, markerSubLabel, markerColor, lapDistanceM }: GpxMapProps) {
+export function GpxMap({ height, marker, progress, showLabel = true, markers, markerLabel, markerSubLabel, markerColor, lapDistanceM, instantUpdate = false }: GpxMapProps) {
   const pathRef = useRef<SVGPathElement>(null)
   const [computedMarker, setComputedMarker] = useState<{ x: number; y: number } | null>(null)
   const [computedMulti, setComputedMulti] = useState<Array<Marker & { x: number; y: number }>>([])
@@ -98,7 +99,7 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers, ma
         {m && (
           <g
             transform={`translate(${m.x} ${m.y})`}
-            style={{ transition: singleSeen ? 'transform 350ms linear' : 'none' }}
+            style={{ transition: instantUpdate ? 'none' : (singleSeen ? 'transform 350ms linear' : 'none') }}
           >
             <circle r="14" fill={markerColor || 'var(--warn)'} opacity="0.18">
               <animate attributeName="r" values="12;18;12" dur="1.6s" repeatCount="indefinite"/>
@@ -125,7 +126,7 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers, ma
             <g
               key={mk.id}
               transform={`translate(${mk.x} ${mk.y})`}
-              style={{ transition: seen ? 'transform 1s linear' : 'none' }}
+              style={{ transition: instantUpdate ? 'none' : (seen ? 'transform 1s linear' : 'none') }}
             >
               <circle r="10" fill={mk.color} opacity="0.18" />
               <circle r="5.5" fill={mk.color} stroke="var(--bg)" strokeWidth="2" />

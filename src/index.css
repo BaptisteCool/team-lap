@@ -235,6 +235,182 @@ input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; marg
 }
 .unlock-slider.is-active .unlock-label { color: oklch(0.92 0.20 135); }
 
+/* === Time scrubber — testMode only (#31) === */
+.time-scrubber {
+  border-top: 1px solid var(--border);
+  padding: 14px 18px;
+}
+
+.time-scrubber-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.time-scrubber-track {
+  position: relative;
+  height: 4px;
+  background: var(--surface-3, var(--surface));
+  border-radius: 999px;
+  margin: 16px 0 32px;
+}
+
+.time-scrubber-track::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: calc(var(--fill-pct, 100%) * 1);
+  background: var(--accent-soft);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.time-scrubber input[type="range"] {
+  position: absolute;
+  inset: -12px 0;
+  width: 100%;
+  height: calc(100% + 24px);
+  opacity: 0;
+  cursor: grab;
+  z-index: 2;
+  margin: 0;
+}
+.time-scrubber input[type="range"]:active { cursor: grabbing; }
+
+.time-scrubber-thumb {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px; height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid var(--bg, #0d1210);
+  pointer-events: none;
+  z-index: 1;
+  transition: width 80ms ease, height 80ms ease;
+}
+
+.time-scrubber-zoom {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+}
+.time-scrubber-zoom-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--muted);
+  background: var(--surface-3, transparent);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+.time-scrubber-zoom-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.time-scrubber-zoom-btn.is-active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft, rgba(166,240,96,0.14));
+}
+.time-scrubber-live-marker {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 14px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 2;
+  box-shadow: 0 0 6px var(--accent);
+}
+.time-scrubber-ticks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.time-scrubber-tick {
+  position: absolute;
+  top: -4px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: all;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.time-scrubber-tick:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.time-scrubber-tick-line {
+  display: block;
+  width: 1px; height: 8px;
+  background: var(--muted-2);
+}
+.time-scrubber-tick-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-top: 10px;
+  white-space: nowrap;
+}
+.time-scrubber-tick-time {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: var(--muted-2);
+}
+.time-scrubber-tick-team {
+  font-size: 10px;
+  color: var(--text-2);
+  font-weight: 600;
+  white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.time-scrubber-tick-runner {
+  font-size: 10px;
+  color: var(--accent);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.time-scrubber-tick.is-active .time-scrubber-tick-line {
+  background: var(--accent);
+}
+.time-scrubber-tick.is-active .time-scrubber-tick-label {
+  color: var(--text);
+}
+
+.time-scrubber-row time {
+  font-size: 13px;
+  color: var(--text-2);
+  font-family: 'JetBrains Mono', monospace;
+}
+.time-scrubber-row time.is-rewind {
+  color: var(--warn);
+}
+
+@media (max-width: 720px) {
+  .time-scrubber-tick-time { display: none; }
+  .time-scrubber-tick-label { font-size: 9px; }
+}
+
+@media (max-width: 360px) {
+  .time-scrubber-row [data-testid="rewind-badge"] { display: none; }
+}
+
 /* Mobile lap-time cycling — show only the active value, click to cycle through */
 @media (max-width: 900px) {
   .lap-times .lap-val-time,
