@@ -1,9 +1,11 @@
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '../convex/hooks'
+import { useFutureSnapshot } from '../hooks/useFutureSnapshot'
 import { useVirtualClock } from '../hooks/useVirtualClock'
 import { fmtClock, fmtKmPace, kmPaceToLapMs, TEAM_COLOR_PALETTE } from '../lib/race-data'
 import { GpxMap } from './GpxMap'
+import { SliderErrorBoundary } from './SliderErrorBoundary'
 import { TestModeBadge } from './TestModeBadge'
 import { TestModeTimelapseSlider } from './TestModeTimelapseSlider'
 
@@ -119,6 +121,14 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
   const endTime = startTime + raceDurationMs
   const { virtualNow, setVirtualNow, isLive, goLive } = useVirtualClock(startTime, testModeDivider, { endTime })
 
+  const isFuture = testMode && virtualNow > Date.now() + 1000
+
+  const {
+    laps: futureLaps,
+    isLoading: isLoadingFuture,
+    error: futureError,
+  } = useFutureSnapshot(event?._id, virtualNow, testMode)
+
   // effectiveNow: virtualNow in testMode (scrub), real now otherwise
   const effectiveNow = testMode ? virtualNow : now
 
@@ -128,10 +138,13 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
 
   // Laps filtered by virtualNow in testMode — memoised for performance
   const filteredLaps = useMemo(() => {
+    if (!testMode) return allLaps ?? null
+    if (virtualNow > Date.now() + 1000) {
+      return futureLaps ?? (allLaps?.filter((l: any) => l.timestamp <= Date.now()) ?? null)
+    }
     if (!allLaps) return null
-    if (!testMode) return allLaps
     return allLaps.filter((l: any) => l.timestamp <= virtualNow)
-  }, [allLaps, testMode, virtualNow])
+  }, [allLaps, testMode, virtualNow, futureLaps])
 
   // Relay ticks: timestamps + team + incoming runner (next stint) for the slider ticks
   const relayTicks = useMemo<Array<{ timestamp: number; teamName: string; runnerName: string }>>(() => {
@@ -325,18 +338,24 @@ export function HomeScreen({ eventSlug, onPickTeam }: HomeScreenProps) {
             </span>
           </div>
           <div className="card-body">
-            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} instantUpdate={testMode && !isLive} />
+            <GpxMap height={420} markers={markers} showLabel lapDistanceM={(event as any)?.lapDistance ?? 900} instantUpdate={testMode && !isLive} dimmed={isFuture} />
             {testMode && raceStarted && (
-              <TestModeTimelapseSlider
-                testMode={testMode}
-                startTime={startTime}
-                endTime={endTime}
-                virtualNow={virtualNow}
-                setVirtualNow={setVirtualNow}
-                isLive={isLive}
-                goLive={goLive}
-                relayTicks={relayTicks}
-              />
+              <SliderErrorBoundary>
+                <TestModeTimelapseSlider
+                  testMode={testMode}
+                  startTime={startTime}
+                  endTime={endTime}
+                  virtualNow={virtualNow}
+                  setVirtualNow={setVirtualNow}
+                  isLive={isLive}
+                  goLive={goLive}
+                  relayTicks={relayTicks}
+                  isFuture={isFuture}
+                  futureOffsetMs={Math.max(0, virtualNow - Date.now())}
+                  isLoadingFuture={isLoadingFuture}
+                  futureError={futureError}
+                />
+              </SliderErrorBoundary>
             )}
           </div>
         </div>
