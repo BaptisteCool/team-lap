@@ -1,4 +1,4 @@
-import { RotateCcw } from 'lucide-react'
+import { FastForward, FlaskConical, Loader2, RotateCcw } from 'lucide-react'
 import React, { useMemo, useState } from 'react'
 
 export type RelayTickInput =
@@ -15,6 +15,10 @@ export type TestModeTimelapseSliderProps = {
   goLive: () => void
   relayTicks?: RelayTickInput[]
   snapToTicks?: boolean
+  isFuture?: boolean
+  futureOffsetMs?: number
+  isLoadingFuture?: boolean
+  futureError?: Error | null
 }
 
 type DerivedTick = {
@@ -59,6 +63,10 @@ export function TestModeTimelapseSlider({
   goLive,
   relayTicks,
   snapToTicks = true,
+  isFuture = false,
+  futureOffsetMs,
+  isLoadingFuture = false,
+  futureError,
 }: TestModeTimelapseSliderProps): React.ReactElement | null {
   if (!testMode) return null
 
@@ -68,6 +76,11 @@ export function TestModeTimelapseSlider({
   const nowMs = Date.now()
   const fullUpper = endTime ?? nowMs
   const fullLower = startTime
+
+  // When endTime is provided, use absolute timestamps for slider min/max/value.
+  // This allows virtualNow > Date.now() (future scrub).
+  // When endTime is absent, use relative offsets (Phase 1 behaviour).
+  const useAbsolute = endTime !== undefined
 
   // Window = visible slider range. When zoomed, centered on virtualNow + clamped to [fullLower, fullUpper].
   let windowStart = fullLower
@@ -90,10 +103,15 @@ export function TestModeTimelapseSlider({
   }
 
   const windowMs = Math.max(1, windowEnd - windowStart)
-  const sliderValue = Math.max(0, virtualNow - windowStart)
-  const fillPct = Math.min(100, Math.max(0, (sliderValue / windowMs) * 100))
-  const liveOffset = nowMs - windowStart
-  const livePct = (liveOffset / windowMs) * 100
+
+  // Slider min/max/value: absolute timestamps when endTime provided, offsets otherwise.
+  const sliderMin = useAbsolute ? windowStart : 0
+  const sliderMax = useAbsolute ? windowEnd : windowMs
+  const sliderValue = useAbsolute ? virtualNow : Math.max(0, virtualNow - windowStart)
+
+  const fillPct = Math.min(100, Math.max(0, ((sliderValue - sliderMin) / (sliderMax - sliderMin)) * 100))
+  const liveOffset = useAbsolute ? nowMs : nowMs - windowStart
+  const livePct = ((liveOffset - sliderMin) / (sliderMax - sliderMin)) * 100
   const liveInWindow = nowMs >= windowStart && nowMs <= windowEnd
 
   const derivedTicks = useMemo<DerivedTick[]>(() => {
@@ -128,7 +146,7 @@ export function TestModeTimelapseSlider({
 
   function handleInput(e: React.FormEvent<HTMLInputElement>) {
     const val = Number((e.target as HTMLInputElement).value)
-    setVirtualNow(windowStart + val)
+    setVirtualNow(useAbsolute ? val : windowStart + val)
   }
 
   function handleMouseDown() {
@@ -183,7 +201,7 @@ export function TestModeTimelapseSlider({
   }
 
   const decalageMs = nowMs - virtualNow
-  const decalageLabel = formatDecalage(decalageMs)
+  const decalageLabel = formatDecalage(Math.abs(decalageMs))
 
   return (
     <div
@@ -193,16 +211,25 @@ export function TestModeTimelapseSlider({
     >
       <div className="time-scrubber-row">
         <div aria-live="polite" aria-atomic="true">
-          {!isLive && (
+          {isFuture ? (
+            <span className="badge future" data-testid="future-badge">
+              {isLoadingFuture ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <FastForward size={16} />
+              )}
+              FUTURE +{formatDecalage(futureOffsetMs ?? 0)}
+            </span>
+          ) : !isLive ? (
             <span className="badge warn" data-testid="rewind-badge">
               <RotateCcw size={16} />
               REWIND -{decalageLabel}
             </span>
-          )}
+          ) : null}
         </div>
 
         <time
-          className={`mono${!isLive ? ' is-rewind' : ''}`}
+          className={`mono${isFuture ? ' is-future' : !isLive ? ' is-rewind' : ''}`}
           aria-label="Position temporelle actuelle"
         >
           {formatHHmm(virtualNow)}
@@ -246,15 +273,21 @@ export function TestModeTimelapseSlider({
         )}
         <input
           type="range"
-          min={0}
-          max={windowMs}
+          min={sliderMin}
+          max={sliderMax}
           value={sliderValue}
           step={1}
           aria-label="Scrubber temporel — position dans la course"
-          aria-valuemin={0}
-          aria-valuemax={windowMs}
+          aria-valuemin={sliderMin}
+          aria-valuemax={sliderMax}
           aria-valuenow={sliderValue}
-          aria-valuetext={`${formatHHmm(virtualNow)} — ${isLive ? 'live' : decalageLabel}`}
+          aria-valuetext={
+            isFuture
+              ? `${formatHHmm(virtualNow)} — FUTUR +${formatDecalage(futureOffsetMs ?? 0)}`
+              : isLive
+                ? `${formatHHmm(virtualNow)} — live`
+                : `${formatHHmm(virtualNow)} — ${decalageLabel}`
+          }
           onInput={handleInput}
           onMouseDown={handleMouseDown}
           onMouseUp={handleMouseUp}
@@ -299,6 +332,17 @@ export function TestModeTimelapseSlider({
           ))}
         </div>
       </div>
+      {isFuture && (
+        <div className="future-simulation-label" aria-live="polite">
+          <FlaskConical size={12} />
+          Projection mock · positions estimees
+        </div>
+      )}
+      {futureError && (
+        <div className="future-error-label" aria-live="polite">
+          Projection indisponible — positions affichees sont les dernieres connues
+        </div>
+      )}
     </div>
   )
 }

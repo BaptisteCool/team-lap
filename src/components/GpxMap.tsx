@@ -20,9 +20,10 @@ interface GpxMapProps {
   markerColor?: string
   lapDistanceM?: number
   instantUpdate?: boolean
+  dimmed?: boolean
 }
 
-export function GpxMap({ height, marker, progress, showLabel = true, markers, markerLabel, markerSubLabel, markerColor, lapDistanceM, instantUpdate = false }: GpxMapProps) {
+export function GpxMap({ height, marker, progress, showLabel = true, markers, markerLabel, markerSubLabel, markerColor, lapDistanceM, instantUpdate = false, dimmed = false }: GpxMapProps) {
   const pathRef = useRef<SVGPathElement>(null)
   const [computedMarker, setComputedMarker] = useState<{ x: number; y: number } | null>(null)
   const [computedMulti, setComputedMulti] = useState<Array<Marker & { x: number; y: number }>>([])
@@ -96,55 +97,57 @@ export function GpxMap({ height, marker, progress, showLabel = true, markers, ma
           </circle>
           <circle r="3.5" fill="var(--accent)" stroke="var(--bg)" strokeWidth="1.5"/>
         </g>
-        {m && (
-          <g
-            transform={`translate(${m.x} ${m.y})`}
-            style={{ transition: instantUpdate ? 'none' : (singleSeen ? 'transform 350ms linear' : 'none') }}
-          >
-            <circle r="14" fill={markerColor || 'var(--warn)'} opacity="0.18">
-              <animate attributeName="r" values="12;18;12" dur="1.6s" repeatCount="indefinite"/>
-              <animate attributeName="opacity" values="0.25;0.05;0.25" dur="1.6s" repeatCount="indefinite"/>
-            </circle>
-            <circle r="7" fill={markerColor || 'var(--warn)'} stroke="var(--bg)" strokeWidth="2"/>
-            {markerLabel && (
-              <text x="13" y="-9" fill="var(--text)" fontSize="11" fontWeight="700"
-                    style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, strokeLinejoin: 'round' }}>
-                {markerLabel}
-              </text>
-            )}
-            {markerSubLabel && (
-              <text x="13" y="5" fill="var(--text-2)" fontSize="10" fontWeight="600"
-                    style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 2.5, strokeLinejoin: 'round' }}>
-                {markerSubLabel}
-              </text>
-            )}
-          </g>
-        )}
-        {computedMulti.map(mk => {
-          const seen = seenIdsRef.current.has(mk.id)
-          return (
+        <g opacity={dimmed ? 0.65 : 1}>
+          {m && (
             <g
-              key={mk.id}
-              transform={`translate(${mk.x} ${mk.y})`}
-              style={{ transition: instantUpdate ? 'none' : (seen ? 'transform 1s linear' : 'none') }}
+              transform={`translate(${m.x} ${m.y})`}
+              style={{ transition: instantUpdate ? 'none' : (singleSeen ? 'transform 350ms linear' : 'none') }}
             >
-              <circle r="10" fill={mk.color} opacity="0.18" />
-              <circle r="5.5" fill={mk.color} stroke="var(--bg)" strokeWidth="2" />
-              {mk.label && (
-                <text x="11" y="-8" fill="var(--text)" fontSize="10" fontWeight="700"
+              <circle r="14" fill={markerColor || 'var(--warn)'} opacity="0.18">
+                <animate attributeName="r" values="12;18;12" dur="1.6s" repeatCount="indefinite"/>
+                <animate attributeName="opacity" values="0.25;0.05;0.25" dur="1.6s" repeatCount="indefinite"/>
+              </circle>
+              <circle r="7" fill={markerColor || 'var(--warn)'} stroke="var(--bg)" strokeWidth="2"/>
+              {markerLabel && (
+                <text x="13" y="-9" fill="var(--text)" fontSize="11" fontWeight="700"
                       style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, strokeLinejoin: 'round' }}>
-                  {mk.label}
+                  {markerLabel}
                 </text>
               )}
-              {mk.subLabel && (
-                <text x="11" y="5" fill="var(--text-2)" fontSize="9" fontWeight="600"
+              {markerSubLabel && (
+                <text x="13" y="5" fill="var(--text-2)" fontSize="10" fontWeight="600"
                       style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 2.5, strokeLinejoin: 'round' }}>
-                  {mk.subLabel}
+                  {markerSubLabel}
                 </text>
               )}
             </g>
-          )
-        })}
+          )}
+          {computedMulti.map(mk => {
+            const seen = seenIdsRef.current.has(mk.id)
+            return (
+              <g
+                key={mk.id}
+                transform={`translate(${mk.x} ${mk.y})`}
+                style={{ transition: instantUpdate ? 'none' : (seen ? 'transform 1s linear' : 'none') }}
+              >
+                <circle r="10" fill={mk.color} opacity="0.18" />
+                <circle r="5.5" fill={mk.color} stroke="var(--bg)" strokeWidth="2" />
+                {mk.label && (
+                  <text x="11" y="-8" fill="var(--text)" fontSize="10" fontWeight="700"
+                        style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 3, strokeLinejoin: 'round' }}>
+                    {mk.label}
+                  </text>
+                )}
+                {mk.subLabel && (
+                  <text x="11" y="5" fill="var(--text-2)" fontSize="9" fontWeight="600"
+                        style={{ paintOrder: 'stroke', stroke: 'var(--bg)', strokeWidth: 2.5, strokeLinejoin: 'round' }}>
+                    {mk.subLabel}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+        </g>
       </svg>
       {showLabel && lapDistanceM != null && (
         <div className="map-meta">{lapDistanceM} m / tour · 56 pts GPX</div>
