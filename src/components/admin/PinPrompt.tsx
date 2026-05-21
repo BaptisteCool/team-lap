@@ -94,11 +94,10 @@ export function PinPrompt({ onSuccess }: PinPromptProps) {
               id="pin-input"
               ref={inputRef}
               type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={8}
+              maxLength={64}
               value={pin}
-              onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
+              onChange={e => setPin(e.target.value)}
+              autoComplete="current-password"
               className="mono"
               style={{
                 fontSize: 22,
